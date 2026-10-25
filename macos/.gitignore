@@ -1,0 +1,6 @@
+Weave.xcodeproj/
+build/
+DerivedData/
+xcuserdata/
+.DS_Store
+dist/

@@ -1,0 +1,40 @@
+# Public Weave: static files only. No backend, no relay proxying, no logs.
+# Build the files first: deploy/build-public.sh, then copy deploy/dist/* to
+# /var/www/weave. Replace weave.example.com with your domain; Caddy gets the
+# Let's Encrypt certificate and redirects HTTP to HTTPS by itself.
+
+{
+	# No access log is written unless a site has a `log` directive (this one
+	# doesn't). Also drop request error logs, which include client addresses.
+	log default {
+		exclude http.log.access http.log.error
+	}
+}
+
+weave.example.com {
+	root * /var/www/weave
+
+	# Only the app's own files; everything else is a bare 404.
+	@app path / /index.html /weave.css /weave.js /weave.zip
+	handle @app {
+		file_server
+	}
+	handle {
+		respond 404
+	}
+
+	header {
+		# Only works as a header; the rest of the CSP is in index.html.
+		Content-Security-Policy "frame-ancestors 'none'"
+		Referrer-Policy no-referrer
+		X-Content-Type-Options nosniff
+		Strict-Transport-Security "max-age=31536000"
+		# Weave uses none of these. Local-network access is left alone:
+		# relays on private or tailnet addresses need it.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=(), midi=(), browsing-topics=()"
+		Cross-Origin-Opener-Policy same-origin
+		# Revalidate on every load (ETag), so updates reach users promptly.
+		Cache-Control no-cache
+		-Server
+	}
+}

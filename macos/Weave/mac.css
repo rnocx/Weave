@@ -1,0 +1,65 @@
+/* Mac-only styling, loaded by the app shell (NativeBridge.js) on top of
+   ../weave.css. Everything is scoped under .native-mac, so the browser
+   version never sees it. The shell sets --mac-top (title bar height) and
+   --mac-lights (width reserved for the traffic lights). */
+
+html.native-mac {
+  --mac-top: 28px;
+  --mac-lights: 78px;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --radius-sm: 7px;
+}
+html.native-mac.mac-fs { --mac-top: 0px; }
+
+/* The window behind the page is a macOS vibrancy view; only the sidebar lets it through. */
+html.native-mac,
+html.native-mac body { background: transparent; }
+
+/* Sidebar: translucent, tinted by the chosen theme. Brand moves to the title bar (the window has no title). */
+html.native-mac .sidebar {
+  background: color-mix(in srgb, var(--bg-side) 58%, transparent);
+  border-right-color: var(--border);
+}
+html.native-mac .side-head { padding-top: calc(var(--mac-top) + 10px); gap: 0; }
+html.native-mac .brand { display: none; }
+html.native-mac .search-btn {
+  height: 28px; border: 0; box-shadow: none; font-size: 12.5px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+html.native-mac .search-btn:hover { background: color-mix(in srgb, var(--text) 11%, transparent); }
+html.native-mac .side-foot { border-top-color: var(--border); }
+
+/* Selection like a macOS source list. */
+html.native-mac .buf { border-radius: 6px; height: 28px; }
+html.native-mac .buf.active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* Chat area stays solid. */
+html.native-mac .main { background: var(--bg); }
+html.native-mac .topbar { min-height: 52px; }
+html.native-mac .nl-head { min-height: 52px; }
+html.native-mac .connect-screen { padding-top: calc(var(--mac-top) + 24px); }
+
+/* Window controls overlap the top-left corner: when the sidebar is a drawer
+   (narrow window), keep the top bar clear of them. */
+@media (max-width: 760px) {
+  html.native-mac:not(.mac-fs) .topbar { padding-left: var(--mac-lights); }
+  html.native-mac:not(.mac-fs) .search-bar,
+  html.native-mac:not(.mac-fs) .tool-bar { padding-left: 14px; }
+}
+
+/* App chrome behaves like an app, not a page: no text selection or pointer hand on controls. */
+html.native-mac .sidebar,
+html.native-mac .topbar,
+html.native-mac .side-foot,
+html.native-mac .nl-head,
+html.native-mac .composer-hint,
+html.native-mac button,
+html.native-mac summary,
+html.native-mac .seg,
+html.native-mac .switch {
+  -webkit-user-select: none; user-select: none; cursor: default;
+}
+html.native-mac .tb-topic { cursor: default; }
+html.native-mac .topbar .tb-title .t { -webkit-user-select: none; }
+

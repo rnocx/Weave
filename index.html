@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="dark light">
+<!-- Only Weave's own script may run (no inline or injected scripts). Styles allow
+     inline style="" attributes, which the app sets for nick colours. Connections,
+     images and media stay open: relays and upload hosts can be anywhere, and links
+     can preview images from any site. frame-ancestors needs a server header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+  connect-src * ws: wss: blob:; img-src * data: blob:; media-src * data: blob:; manifest-src 'self' blob:;
+  object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta name="theme-color" content="#111318">
+<title>Weave</title>
+<link id="favicon" rel="icon" href="data:,">
+<!-- Home-screen app: the manifest and icons are generated at runtime (see installable app section). -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Weave">
+<meta name="application-name" content="Weave">
+<link id="appleIcon" rel="apple-touch-icon" href="data:,">
+<link rel="stylesheet" href="weave.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════ Connect screen ═══════════════════════════ -->
+<section id="connectScreen" class="connect-screen">
+  <div class="connect-card">
+    <div class="brand-lg">
+      <svg class="logo" data-logo viewBox="0 0 32 32"></svg>
+      <div><h1>Weave</h1><p id="cTagline">Connect to your WeeChat relay</p></div>
+    </div>
+    <form id="connectForm" novalidate>
+      <div class="row2">
+        <label class="field"><span>Host</span><input id="cHost" placeholder="relay.example.com" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="url"></label>
+        <label class="field"><span>Port</span><input id="cPort" inputmode="numeric" placeholder="9000" autocomplete="off"></label>
+      </div>
+      <label class="field"><span>Relay password</span>
+        <div class="pw"><input id="cPass" type="password" autocomplete="current-password"><button type="button" id="cPassToggle">Show</button></div>
+      </label>
+      <div class="toggles">
+        <label class="switch"><input type="checkbox" id="cTls"><span class="sw"></span><span>Use TLS (wss://)</span></label>
+        <label class="switch"><input type="checkbox" id="cRemember"><span class="sw"></span><span>Remember password on this device (stored unencrypted)</span></label>
+        <label class="switch"><input type="checkbox" id="cAuto"><span class="sw"></span><span>Connect automatically</span></label>
+      </div>
+      <details class="adv">
+        <summary><svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>Advanced</summary>
+        <div class="adv-body">
+          <label class="field"><span>API path</span><input id="cPath" placeholder="/api" autocomplete="off" spellcheck="false"></label>
+          <label class="field"><span>Authentication</span>
+            <select id="cAuth">
+              <option value="auto">Hashed password when supported (recommended)</option>
+              <option value="plain">Plain password</option>
+            </select>
+          </label>
+        </div>
+      </details>
+      <div id="cError" class="alert" role="alert" hidden></div>
+      <button class="btn primary block" id="cSubmit" type="submit">Connect</button>
+      <p class="hint" id="cPrivacy" hidden>Your settings and password stay in this browser. This site only delivers the app: it stores nothing and never sees your chat.</p>
+    </form>
+    <!-- Public mode: relay-owner checklist (the origin command is filled in by weave.js). -->
+    <div class="setup" id="publicSetup" hidden>
+      <div class="setup-h">Your relay needs</div>
+      <ol class="checklist">
+        <li><b>Secure WebSocket (wss://)</b> with a certificate your browsers trust: <code>/relay add tls.api 9000</code>, or a reverse proxy or Tailscale Serve in front of a plain <code>api</code> relay. This page uses HTTPS, so browsers block plain <code>ws://</code>, and self-signed certificates must be accepted on every device.</li>
+        <li><b>To be reachable</b> from this device: over the internet, or on the same VPN or tailnet. Relays on private addresses may make the browser ask for local-network access.</li>
+        <li><b>To allow this page:</b><pre id="originCmd"></pre></li>
+        <li><b><code>relay.network.allowed_ips</code></b> to include your devices, or <code>127.0.0.1</code> when a proxy sits in front.</li>
+        <li><b>A strong password:</b><pre>/set relay.network.password "<span class="muted">a-strong-password</span>"</pre>It's sent hashed when the relay supports it.</li>
+      </ol>
+      <p class="hint" id="publicLinks" hidden></p>
+    </div>
+    <div class="setup" id="personalSetup">
+      <div class="setup-h">Relay setup (run inside WeeChat)</div>
+<pre>/set relay.network.password "<span class="muted">your-password</span>"
+/relay add tls.api 9000   <span class="muted"># or: /relay add api 9000</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ Chat screen ══════════════════════════════ -->
+<section id="chatScreen" class="app" hidden>
+  <aside id="sidebar" class="sidebar" aria-label="Buffers">
+    <div class="side-head">
+      <div class="brand"><svg class="logo" data-logo viewBox="0 0 32 32"></svg>Weave<span class="ver" id="verLabel"></span></div>
+      <button class="search-btn" id="btnSwitcher" type="button"><svg class="i i-sm" data-i="search"></svg><span>Jump to…</span><kbd>Ctrl K</kbd></button>
+    </div>
+    <nav id="bufList" class="buf-list"></nav>
+    <div class="side-foot">
+      <div class="conn" title=""><span id="connDot" class="dot"></span><div class="conn-txt"><div id="connLabel">Offline</div><div id="connSub" class="muted"></div></div></div>
+      <button class="icon-btn" id="btnTheme" type="button" title="Toggle theme"></button>
+      <button class="icon-btn" id="btnSettings" type="button" title="Settings"><svg class="i" data-i="sliders"></svg></button>
+      <button class="icon-btn" id="btnDisconnect" type="button" title="Disconnect"><svg class="i" data-i="power"></svg></button>
+    </div>
+    <div class="side-resize" id="sideResize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" title="Drag to resize, double-click to reset" tabindex="0"></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="btnMenu" type="button" title="Buffers"><svg class="i" data-i="menu"></svg></button>
+      <div class="tb-main">
+        <div class="tb-title" id="tbTitle"></div>
+        <div class="tb-topic" id="tbTopic" title="Click to expand"></div>
+      </div>
+      <div class="tb-actions">
+        <button class="icon-btn" id="btnSearch" type="button" title="Search this buffer (Ctrl+F)"><svg class="i" data-i="search"></svg></button>
+        <button class="icon-btn" id="btnFilter" type="button" title="Hide join/part/quit noise"></button>
+        <button class="pill-btn" id="btnMembers" type="button" title="Members"><svg class="i i-sm" data-i="users"></svg><span id="memberCount"></span></button>
+      </div>
+    </header>
+    <div id="searchBar" class="search-bar" role="search" hidden>
+      <svg class="i i-sm" data-i="search"></svg>
+      <input id="searchInput" type="search" placeholder="Search this buffer" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-label="Search this buffer">
+      <span id="searchCount" class="search-count" aria-live="polite"></span>
+      <button class="link-btn" id="searchMore" type="button" hidden>Search older</button>
+      <button class="icon-btn" id="searchPrev" type="button" title="Older match (Enter)" aria-label="Older match"><svg class="i" data-i="chevUp"></svg></button>
+      <button class="icon-btn" id="searchNext" type="button" title="Newer match (Shift+Enter)" aria-label="Newer match"><svg class="i" data-i="chevDown"></svg></button>
+      <button class="pill-btn" id="searchOnly" type="button" aria-pressed="false" title="Show only matching messages">Only<span class="wide-only"> matches</span></button>
+      <button class="icon-btn" id="searchClose" type="button" title="Close search (Esc)" aria-label="Close search"><svg class="i" data-i="x"></svg></button>
+    </div>
+    <div id="fsetBar" class="tool-bar" role="toolbar" aria-label="Option actions" hidden>
+      <button class="icon-btn" type="button" data-cmd="/fset -up" title="Previous option (↑)" aria-label="Previous option"><svg class="i" data-i="chevUp"></svg></button>
+      <button class="icon-btn" type="button" data-cmd="/fset -down" title="Next option (↓)" aria-label="Next option"><svg class="i" data-i="chevDown"></svg></button>
+      <button class="pill-btn primary" type="button" data-cmd="/fset -set" title="Edit the value (Alt+Enter, or click the selected option)">Edit</button>
+      <button class="pill-btn" type="button" data-cmd="/fset -toggle" title="Toggle a boolean (Alt+Space)">Toggle</button>
+      <button class="pill-btn" type="button" data-cmd="/fset -add -1" title="Decrease a number (Alt+−)">−1</button>
+      <button class="pill-btn" type="button" data-cmd="/fset -add 1" title="Increase a number (Alt++)">+1</button>
+      <button class="pill-btn" type="button" data-cmd="/fset -reset" title="Reset to the default value (Alt+F, Alt+R)">Reset</button>
+      <button class="pill-btn" type="button" data-cmd="/fset -unset" title="Unset the option (Alt+F, Alt+U)">Unset</button>
+      <button class="pill-btn" type="button" data-cmd="/fset -mark" title="Mark the option (Alt+,)">Mark</button>
+      <button class="pill-btn" type="button" data-cmd="/fset -format" title="Switch layout: show descriptions and defaults (Ctrl+X)">Details</button>
+    </div>
+    <div class="msgs-wrap">
+      <div id="msgs" class="msgs" role="log" aria-live="polite"></div>
+      <button id="jump" class="jump" type="button" hidden><svg class="i" data-i="down"></svg><span></span></button>
+      <div id="banner" class="banner" hidden><span id="bannerText"></span><button id="bannerBtn" type="button">Retry now</button><button id="bannerLogin" type="button" hidden>Back to login</button></div>
+    </div>
+    <div id="dropZone" class="drop" hidden><div><span class="big-i"><svg data-i="upload"></svg></span>Drop to upload<small id="dropHost"></small></div></div>
+    <div class="composer-wrap">
+      <div id="uploads" class="uploads" hidden></div>
+      <div class="composer">
+        <button id="btnAttach" class="icon-btn attach-btn" type="button" title="Upload files" hidden><svg class="i" data-i="clip"></svg></button>
+        <input id="fileInput" type="file" multiple hidden>
+        <span id="myNick" class="my-nick" title="Your nick"></span>
+        <textarea id="input" rows="1" placeholder="Message" autocomplete="off" enterkeyhint="send"></textarea>
+        <button id="btnTab" class="icon-btn tab-btn only-touch" type="button" title="Complete nick or command"><svg class="i" data-i="tab"></svg></button>
+        <button id="btnSend" class="send-btn" type="button" title="Send (Enter)" disabled><svg class="i" data-i="send"></svg></button>
+      </div>
+      <div id="composerHint" class="composer-hint"></div>
+    </div>
+  </main>
+
+  <aside id="nicklist" class="nicklist" aria-label="Members">
+    <div class="nl-head">Members <span class="muted" id="nlCount"></span>
+      <button class="icon-btn" id="btnNlClose" type="button" title="Close"><svg class="i" data-i="x"></svg></button></div>
+    <div id="nlBody" class="nl-body"></div>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+</section>
+
+<!-- ═══════════════════════════ Dialogs ══════════════════════════════════ -->
+<dialog id="switcherDlg" class="sw-dlg" aria-label="Jump to buffer">
+  <div class="switcher">
+    <div class="sw-in"><svg class="i" data-i="search"></svg><input id="swInput" placeholder="Jump to a buffer…" autocomplete="off" spellcheck="false"></div>
+    <div id="swList" class="sw-list" role="listbox"></div>
+    <div class="sw-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div>
+  </div>
+</dialog>
+
+<dialog id="paletteDlg" class="sw-dlg" aria-label="Commands">
+  <div class="switcher palette">
+    <div class="sw-in"><svg class="i" data-i="term"></svg><input id="palInput" placeholder="Search WeeChat commands…" autocomplete="off" spellcheck="false"></div>
+    <div id="palList" class="sw-list" role="listbox"></div>
+    <div class="pal-args" id="palArgs"></div>
+    <div class="sw-foot"><span><kbd>Enter</kbd> insert</span><span><kbd>Shift</kbd> <kbd>Enter</kbd> <button class="linklike" id="palHelp" type="button">full help</button></span><span><kbd>Esc</kbd> close</span></div>
+  </div>
+</dialog>
+
+<dialog id="settingsDlg" aria-label="Settings">
+  <div class="dlg">
+    <div class="dlg-h"><h2>Settings</h2><button class="icon-btn" type="button" data-close title="Close"><svg class="i" data-i="x"></svg></button></div>
+    <div class="dlg-b">
+      <div class="set-sec"><h3>Appearance</h3>
+        <div class="set-row"><div class="lbl"><b>Mode</b></div>
+          <div class="seg" data-setting="theme"><button data-v="system">System</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
+        <div class="set-row col"><div class="lbl"><b>Dark theme</b></div><div class="theme-grid" id="darkThemes"></div></div>
+        <div class="set-row col"><div class="lbl"><b>Light theme</b></div><div class="theme-grid" id="lightThemes"></div></div>
+        <div class="set-row"><div class="lbl"><b>Accent</b></div><div class="swatches" id="swatches"></div></div>
+        <div class="set-row"><div class="lbl"><b>Chat font</b></div>
+          <div class="seg" data-setting="font"><button data-v="sans">Sans</button><button data-v="mono">Mono</button></div></div>
+        <div class="set-row"><div class="lbl"><b>Text size</b></div>
+          <div class="seg" data-setting="fontSize"><button data-v="13">S</button><button data-v="14">M</button><button data-v="15">L</button><button data-v="16">XL</button></div></div>
+        <div class="set-row"><div class="lbl"><b>Density</b></div>
+          <div class="seg" data-setting="density"><button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button></div></div>
+        <div class="set-row"><div class="lbl"><b>Clock</b></div>
+          <div class="seg" data-setting="clock"><button data-v="24">24h</button><button data-v="24s">24h:ss</button><button data-v="12">12h</button></div></div>
+      </div>
+      <div class="set-sec"><h3>Chat</h3>
+        <div class="set-row"><div class="lbl"><b>Group consecutive messages</b><small>Show a nick once per run of messages</small></div>
+          <label class="switch"><input type="checkbox" data-setting="groupMessages"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>Smart filter by default</b><small>Hide join/part/quit from people who haven't spoken recently</small></div>
+          <label class="switch"><input type="checkbox" data-setting="smartFilter"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>Hide all join/part/quit</b></div>
+          <label class="switch"><input type="checkbox" data-setting="hideJoins"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>Media previews</b><small>Images &amp; video from links load from third-party hosts</small></div>
+          <div class="seg" data-setting="media"><button data-v="off">Off</button><button data-v="click">On click</button><button data-v="auto">Auto</button></div></div>
+        <div class="set-row"><div class="lbl"><b>Show member list</b></div>
+          <label class="switch"><input type="checkbox" data-setting="nicklist"><span class="sw"></span></label></div>
+      </div>
+      <div class="set-sec"><h3>Behaviour</h3>
+        <div class="set-row"><div class="lbl"><b>Desktop notifications</b><small>On highlights and private messages</small></div>
+          <label class="switch"><input type="checkbox" data-setting="notify"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>Sync read state with WeeChat</b><small>Clear WeeChat's hotlist and move its read marker as you read</small></div>
+          <label class="switch"><input type="checkbox" data-setting="syncRead"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>Follow in WeeChat</b><small>Switch WeeChat's current buffer when you switch here</small></div>
+          <label class="switch"><input type="checkbox" data-setting="syncCurrent"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>Remember input history</b><small>Kept on this device for <kbd>↑</kbd>/<kbd>↓</kbd> recall. Lines that look like secrets (NickServ, /secure, /oper, channel keys, password options) are never saved.</small></div>
+          <label class="switch"><input type="checkbox" data-setting="saveHistory"><span class="sw"></span></label></div>
+      </div>
+      <div class="set-sec" id="setUploads"><h3>File uploads</h3>
+        <div class="set-row"><div class="lbl"><b>Service</b><small>Files you attach, drop or paste are uploaded here, and the link is added to your message.</small></div>
+          <select class="set-input" data-setting="uploadBackend">
+            <option value="off">Off</option><option value="jirafeau">Jirafeau (your own server)</option>
+            <option value="litterbox">Litterbox</option><option value="tmpfiles">tmpfiles.org</option><option value="filebin">Filebin</option>
+          </select></div>
+        <div id="upLitterbox">
+        <div class="set-row"><div class="lbl"><b>About Litterbox</b><small>Free, anonymous, temporary hosting by <a href="https://litterbox.catbox.moe" target="_blank" rel="noopener noreferrer">catbox.moe</a>. Anyone with the link can download the file until it expires, and uploads can't be deleted early. Up to 1 GB per file.</small></div></div>
+        <div class="set-row"><div class="lbl"><b>Keep files for</b></div>
+          <div class="seg" data-setting="litterboxTime"><button data-v="1h">1 hour</button><button data-v="12h">12 hours</button><button data-v="24h">1 day</button><button data-v="72h">3 days</button></div></div>
+        </div>
+        <div id="upTmpfiles">
+        <div class="set-row"><div class="lbl"><b>About tmpfiles.org</b><small>Free, anonymous, temporary hosting by <a href="https://tmpfiles.org" target="_blank" rel="noopener noreferrer">tmpfiles.org</a>. The link opens a download page; anyone with it can download the file until it expires, and uploads can't be deleted early. Up to 100 MB per file.</small></div></div>
+        <div class="set-row"><div class="lbl"><b>Keep files for</b></div>
+          <div class="seg" data-setting="tmpfilesTime"><button data-v="1h">1 hour</button><button data-v="6h">6 hours</button><button data-v="24h">1 day</button><button data-v="48h">2 days</button></div></div>
+        </div>
+        <div id="upFilebin">
+        <div class="set-row"><div class="lbl"><b>About Filebin</b><small>Free, anonymous hosting by <a href="https://filebin.net" target="_blank" rel="noopener noreferrer">filebin.net</a>. Each file gets its own randomly named bin, kept for about 6 days. Anyone with the link can download the file, and delete it from its bin page (Recent uploads → "Manage…").</small></div></div>
+        </div>
+        <div id="upJirafeau">
+        <div class="set-row"><div class="lbl"><b>Jirafeau server</b><small>Your own <a href="https://gitlab.com/jirafeau/Jirafeau" target="_blank" rel="noopener noreferrer">Jirafeau</a> instance. It must allow this page via CORS; see the README.</small></div>
+          <input class="set-input" type="url" data-setting="uploadUrl" placeholder="https://files.example.com/" spellcheck="false" autocomplete="off"></div>
+        <div class="set-row"><div class="lbl"><b>Server status</b><div class="up-status" id="upStatus"></div></div>
+          <button class="btn sm" id="btnUpTest" type="button">Test</button></div>
+        <div class="set-row"><div class="lbl"><b>Keep files for</b><small>Must be a duration the server allows.</small></div>
+          <select class="set-input" data-setting="uploadTime">
+            <option value="minute">1 minute</option><option value="hour">1 hour</option><option value="day">1 day</option><option value="week">1 week</option>
+            <option value="fortnight">2 weeks</option><option value="month">1 month</option><option value="quarter">3 months</option><option value="year">1 year</option><option value="none">Forever</option>
+          </select></div>
+        <div class="set-row"><div class="lbl"><b>Upload password</b><small>Only if the server requires one. Stored unencrypted on this device.</small></div>
+          <input class="set-input" type="password" data-setting="uploadPassword" autocomplete="off"></div>
+        <div class="set-row"><div class="lbl"><b>Delete after first download</b></div>
+          <label class="switch"><input type="checkbox" data-setting="uploadOneTime"><span class="sw"></span></label></div>
+        </div>
+        <div class="set-row"><div class="lbl"><b>After uploading</b></div>
+          <div class="seg" data-setting="uploadAction"><button data-v="insert">Insert link</button><button data-v="send">Send link</button></div></div>
+        <div class="set-row col"><div class="lbl"><b>Recent uploads</b><small id="recentHint">"Delete…" opens Jirafeau's delete page.</small></div><div id="recentUploads" class="recent-ups"></div></div>
+      </div>
+      <div class="set-sec kbd-sec"><h3>Keyboard</h3>
+        <div class="kbd-grid">
+          <span><kbd>Ctrl</kbd> <kbd>K</kbd></span><span>Jump to buffer</span>
+          <span><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>P</kbd></span><span>Command palette: browse WeeChat commands (or type <kbd>/</kbd> in the message box)</span>
+          <span><kbd>Ctrl</kbd> <kbd>F</kbd></span><span>Search this buffer (<kbd>Enter</kbd> older, <kbd>Shift</kbd> <kbd>Enter</kbd> newer)</span>
+          <span><kbd>Alt</kbd> <kbd>↑</kbd> / <kbd>↓</kbd></span><span>Previous / next buffer</span>
+          <span><kbd>Alt</kbd> <kbd>A</kbd></span><span>Next buffer with activity</span>
+          <span><kbd>Shift</kbd> <kbd>Esc</kbd></span><span>Mark all buffers as read</span>
+          <span><kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>↑</kbd> / <kbd>↓</kbd></span><span>Move the current buffer up / down in the sidebar</span>
+          <span>Right-click</span><span>Buffer menu: pin, move, mark as read (long-press on touch screens)</span>
+          <span>fset, /script…</span><span>The buffer's own WeeChat keys work (e.g. <kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>Alt</kbd> <kbd>Space</kbd>, <kbd>Alt</kbd> <kbd>Enter</kbd>)</span>
+          <span><kbd>Alt</kbd> <kbd>1</kbd>–<kbd>9</kbd></span><span>Buffer by number</span>
+          <span><kbd>Tab</kbd></span><span>Complete nicks, commands &amp; channels (WeeChat completion)</span>
+          <span><kbd>↑</kbd> / <kbd>↓</kbd></span><span>Input history</span>
+          <span><kbd>Shift</kbd> <kbd>Enter</kbd></span><span>New line</span>
+          <span><kbd>PgUp</kbd> / <kbd>PgDn</kbd></span><span>Scroll messages</span>
+        </div>
+      </div>
+      <div class="set-sec" id="appSec" hidden><h3>App</h3>
+        <div class="set-row"><div class="lbl"><b>Install Weave</b><small id="installHint">Add it to your home screen or desktop. It opens in its own window, without the browser's address bar.</small></div>
+          <button class="btn sm primary" id="btnInstall" type="button" hidden>Install</button></div>
+      </div>
+      <div class="set-sec"><h3>About</h3><div class="about" id="aboutText"></div></div>
+    </div>
+  </div>
+</dialog>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="weave.js"></script>
+</body>
+</html>

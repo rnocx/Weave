@@ -1,0 +1,61 @@
+# macOS shell for Weave. The web app (../index.html, ../weave.css, ../weave.js)
+# is NOT copied here: the project references those files in place, so the
+# browser version and the Mac app always build from the same source.
+# Regenerate the Xcode project after editing this file:  xcodegen generate
+name: Weave
+options:
+  bundleIdPrefix: me.interdo
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"          # ad-hoc: runs on this Mac. Set DEVELOPMENT_TEAM to sign for distribution.
+    ENABLE_HARDENED_RUNTIME: YES
+targets:
+  Weave:
+    type: application
+    platform: macOS
+    sources:
+      - path: Weave
+        excludes: ["*.entitlements"]
+      # Shared with the browser version, referenced from the repo root.
+      - path: ../index.html
+        group: Web (shared with the browser version)
+        buildPhase: resources
+      - path: ../weave.css
+        group: Web (shared with the browser version)
+        buildPhase: resources
+      - path: ../weave.js
+        group: Web (shared with the browser version)
+        buildPhase: resources
+    info:
+      path: Weave/Info.plist
+      properties:
+        CFBundleDisplayName: Weave
+        CFBundleName: Weave
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.social-networking
+        NSHumanReadableCopyright: ""
+        # Plain ws:// relays on a LAN / tailnet must work, as in the browser.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        # Debug builds read the web files straight from the repo (reload with
+        # ⌘R to see edits without rebuilding). Empty in Release: bundle only.
+        WeaveDevWebRoot: $(WEAVE_DEV_WEB_ROOT)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.interdo.weave
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+      configs:
+        Debug:
+          WEAVE_DEV_WEB_ROOT: $(SRCROOT)/..
+          CODE_SIGN_ENTITLEMENTS: Weave/Weave-Debug.entitlements   # not sandboxed, so it can read ../
+        Release:
+          WEAVE_DEV_WEB_ROOT: ""
+          CODE_SIGN_ENTITLEMENTS: Weave/Weave-Release.entitlements # sandboxed
