@@ -1,9 +1,30 @@
+<p align="center"><img src="docs/icon.png" width="128" height="128" alt="Weave icon"></p>
+
 # Weave
 
 A self-contained web client for [WeeChat](https://weechat.org/)'s **API relay**
 (WeeChat ≥ 4.0). The whole app is three static files — `index.html`,
 `weave.css` and `weave.js` — with no build step, no dependencies, and no
 external requests.
+
+![Weave in dark mode: sidebar grouped by server, a channel with a highlighted mention, and the member list](docs/screenshots/dark.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/light.png" alt="Light mode with the Catppuccin Latte theme"></td>
+    <td width="50%"><img src="docs/screenshots/palette.png" alt="Command palette listing WeeChat commands with their arguments"></td>
+  </tr>
+  <tr>
+    <td align="center">Light mode (Catppuccin Latte)</td>
+    <td align="center">Command palette</td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/phone.png" width="260" alt="Phone layout: stacked messages and the message box">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/phone-drawer.png" width="260" alt="Phone layout: buffer drawer open">
+</p>
 
 ## Features
 
@@ -14,7 +35,8 @@ external requests.
   is never sent in plain text. It falls back to a plain password if the
   handshake isn't reachable
 - Sidebar grouped by IRC server, with unread and mention badges and
-  collapsible groups; joining a channel from the sidebar
+  collapsible groups; joining a channel from the sidebar. Drag its edge to
+  resize it (double-click the edge to reset)
 - Quick switcher (<kbd>Ctrl</kbd>+<kbd>K</kbd>) with fuzzy matching
 - **Command palette** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>, or type
   `/` in the message box): every command your WeeChat has, with descriptions
@@ -123,9 +145,19 @@ bound to localhost (`/set relay.network.bind_address "127.0.0.1"`).
 
 ### Mac app
 
-`macos/` holds a native macOS shell (a `WKWebView` around these same three
-files, with system notifications and a Dock badge). It builds from the files in
-this folder, so one edit updates both. See `macos/README.md`.
+`macos/` holds a native macOS shell: a `WKWebView` around these same three
+files. It builds from the files in this folder, so one edit updates both. On
+top of the web app it adds:
+
+- System notifications and an unread-mentions badge on the Dock icon
+- The remembered password in the **macOS Keychain** instead of browser storage
+- **Self-signed relay certificates**, trusted on first use: Weave shows the
+  certificate's SHA-256 fingerprint once, remembers it for that host and port,
+  and warns if it ever changes (File → Forget Trusted Certificates resets this)
+- Native menus and shortcuts, including Go → Command Palette… (⇧⌘P)
+- Closing the window keeps the connection and notifications running
+
+See `macos/README.md` for building it.
 
 ### Public hosting
 
@@ -182,7 +214,8 @@ local-network access (e.g. Chrome's "Local Network Access" prompt).
 If the relay uses a self-signed certificate, the connection fails until the
 browser trusts it. The connect screen's error then links to
 `https://host:port/api/version`: open it, accept the warning, and connect
-again.
+again. The Mac app asks instead: it shows the certificate's fingerprint and,
+if you trust it, remembers it (see [Mac app](#mac-app)).
 
 ## File uploads
 
@@ -304,12 +337,14 @@ itself (`enable_crypt` links work).
 | Keys | Action |
 |---|---|
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd> | Jump to buffer |
+| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> | Command palette (or type `/` in an empty message box). <kbd>Enter</kbd> inserts the command, <kbd>Shift</kbd>+<kbd>Enter</kbd> shows its `/help` |
 | <kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> | Previous / next buffer |
 | <kbd>Alt</kbd> + <kbd>A</kbd> | Next buffer with activity (mentions first) |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd> | Search this buffer (<kbd>Enter</kbd> older, <kbd>Shift</kbd>+<kbd>Enter</kbd> newer) |
 | <kbd>Shift</kbd> + <kbd>Esc</kbd> | Mark all buffers as read |
 | <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> | Move the current buffer up / down in the sidebar |
-| Right-click a buffer | Buffer menu: pin, move, mark as read, leave (long-press on touch screens) |
+| Right-click a buffer | Buffer menu: pin, move, mark as read, notifications (all / mentions only / mute), leave (long-press on touch screens) |
+| Right-click a message | Message menu: reply, quote, copy text, copy links (long-press on touch screens) |
 | In `/fset`, `/script`… | The buffer's own WeeChat keys (e.g. <kbd>↑</kbd>/<kbd>↓</kbd>, <kbd>Alt</kbd>+<kbd>Space</kbd> toggle, <kbd>Alt</kbd>+<kbd>Enter</kbd> edit, <kbd>Alt</kbd>+<kbd>F</kbd> <kbd>Alt</kbd>+<kbd>R</kbd> reset) |
 | <kbd>Alt</kbd> + <kbd>1</kbd>…<kbd>0</kbd> | Buffer by number |
 | <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Complete (cycle forward / back) |
@@ -387,9 +422,10 @@ Undo with `sudo tailscale serve --https=8443 off`.
 ## Privacy and storage
 
 Settings (including an upload password, if set), recent upload links with
-their delete codes, the last connection (host, port, TLS) and input history are kept in
-`localStorage`. The password is stored only if you tick **Remember password**,
-and then unencrypted. Input lines that look like secrets (NickServ/ChanServ
+their delete codes, the last connection (host, port, TLS), input history and
+the sidebar layout (pins, order, per-buffer notification levels) are kept in
+`localStorage`. The password is stored only if you tick **Remember password**:
+unencrypted in a browser, and in the Keychain in the Mac app. Input lines that look like secrets (NickServ/ChanServ
 commands, `/secure`, `/oper`, channel keys, password options) are never saved
 to history, and saving history can be turned off in Settings.
 Media previews load images from the linked hosts, so they're off by default
@@ -414,4 +450,5 @@ Media previews load images from the linked hosts, so they're off by default
 - WeeChat logs `relay: error decoding websocket frame` whenever a browser
   closes the connection normally. That's the relay reacting to the standard
   close frame and is harmless.
-- Tested against WeeChat 4.9.0 (relay API 0.4.1).
+- Tested against WeeChat 4.9.0 (relay API 0.4.1) and 4.9.3. The command
+  palette's descriptions come from WeeChat 4.9's `/help`.
