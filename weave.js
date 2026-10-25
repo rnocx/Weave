@@ -127,6 +127,17 @@ const CONFIG = {
 // Public mode: no upload default (nobody uploads to the host's server unless
 // they pick a service themselves) and no guessed relay address.
 const PUBLIC = CONFIG.mode === 'public';
+// A public copy may be served without a frame-ancestors header (GitHub Pages
+// can't send one), so refuse to run inside another site's frame: it could
+// overlay the connect form and catch relay passwords.
+if (PUBLIC && window.top !== window.self) {
+  document.body.innerHTML = '<p style="font:16px system-ui,sans-serif;margin:2em;text-align:center">' +
+    'Weave can\'t run inside another page. <a target="_blank" rel="noopener noreferrer"></a></p>';
+  const a = document.querySelector('a');
+  a.href = location.href;
+  a.textContent = 'Open it in its own tab';
+  throw new Error('Weave refuses to run in a frame');
+}
 
 // Colour themes per mode; the palettes are in weave.css ([data-palette]).
 const THEMES = {

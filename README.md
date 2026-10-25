@@ -166,6 +166,21 @@ connects to *their own* relay. The server only delivers the three files: it
 stores nothing and never sees chat traffic or passwords, since the browser
 talks straight to the user's relay. See `PUBLIC-HOSTING.md` for the full plan.
 
+A public copy is live at **<https://rnocx.github.io/Weave/>**, built from
+`main` by `.github/workflows/pages.yml`. To use it, allow its origin on your
+relay (see the [checklist](#relay-owner-checklist)):
+
+```
+/set relay.network.websocket_allowed_origins "^https://rnocx\.github\.io$"
+```
+
+GitHub Pages can't send custom headers, so that copy goes without the ones the
+Caddy and nginx configs below set. In their place, the public build refuses to
+run inside another site's frame, and browsers may cache it for up to 10 minutes
+after an update.
+
+To host your own public copy:
+
 1. Build the public copy: `deploy/build-public.sh [source-url]`. It writes
    `deploy/dist/` with `CONFIG.mode` set to `'public'`, no Jirafeau default,
    and `weave.zip` (the app, for people who'd rather host it themselves or
