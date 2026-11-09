@@ -244,6 +244,7 @@ details.adv .adv-body{display:flex;flex-direction:column;gap:12px;margin-top:12p
 .checklist code{font:12px var(--font-mono)}
 #publicLinks{margin-top:14px}
 #publicLinks a{color:var(--accent);font-weight:600}
+#publicLinks a .i{vertical-align:-3px;margin-right:2px}
 
 /* ── App layout ─────────────────────────────────────────────────────────── */
 .app{position:fixed;left:0;right:0;top:var(--vv-top,0px);height:var(--vv-h,100dvh);display:flex}

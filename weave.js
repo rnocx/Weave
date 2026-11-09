@@ -41,6 +41,7 @@ async function loadPassword(saved) {
 }
 
 const ICONS = {
+  github: '<path d="M9 19c-4.3 1.3-4.3-2.2-6-2.7m12 5v-3.4a3 3 0 0 0-.8-2.3c2.7-.3 5.6-1.3 5.6-6A4.7 4.7 0 0 0 18.5 6a4.3 4.3 0 0 0-.1-3.6s-1-.3-3.7 1.4a12.8 12.8 0 0 0-6.7 0C5.4 2.1 4.4 2.4 4.4 2.4A4.3 4.3 0 0 0 4.3 6 4.7 4.7 0 0 0 3 9.6c0 4.7 2.9 5.7 5.6 6a3 3 0 0 0-.8 2.3v3.4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   hash: '<path d="M5 9h14M4 15h14M10 3 8 21M16 3l-2 18"/>',
   server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
@@ -122,7 +123,7 @@ const CONFIG = {
   uploadUrl: 'https://files.interdo.me/',   // Jirafeau base URL
   uploadTime: 'day',                         // default expiry: minute, hour, day, week, fortnight, month, quarter, year, none
   downloadUrl: '',                           // public mode: link to a zip of the app, for self-hosting
-  sourceUrl: '',                             // public mode: link to the source code
+  sourceUrl: 'https://github.com/rnocx/Weave',                             // public mode: link to the source code
 };
 // Public mode: no upload default (nobody uploads to the host's server unless
 // they pick a service themselves) and no guessed relay address.
@@ -3334,7 +3335,7 @@ function setupPublicConnect() {
   const re = '^' + origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$';
   $('#originCmd').textContent = `/set relay.network.websocket_allowed_origins "${re}"`;
   const links = [];
-  if (CONFIG.sourceUrl) links.push(`<a href="${esc(CONFIG.sourceUrl)}" target="_blank" rel="noopener noreferrer">Source code</a>`);
+  if (CONFIG.sourceUrl) links.push(`<a href="${esc(CONFIG.sourceUrl)}" target="_blank" rel="noopener noreferrer">${ico('github', 'i-sm')} GitHub</a>`);
   if (CONFIG.downloadUrl) links.push(`<a href="${esc(CONFIG.downloadUrl)}" download>Download Weave</a> to host it yourself or open it locally`);
   if (links.length) { $('#publicLinks').innerHTML = links.join(' · '); $('#publicLinks').hidden = false; }
 }
