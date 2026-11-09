@@ -151,6 +151,7 @@ const DEFAULTS = {
   theme: 'system', darkTheme: 'weave', lightTheme: 'weave', accent: 'auto', font: 'sans', fontSize: '14', density: 'comfortable', clock: '24',
   groupMessages: true, smartFilter: true, hideJoins: false, media: 'click', nicklist: true,
   notify: false, syncRead: true, syncCurrent: false, saveHistory: true,
+  privatebinUrl: 'https://0bin.ch/',
   uploadBackend: PUBLIC ? 'off' : CONFIG.uploadBackend, litterboxTime: '24h', tmpfilesTime: '1h',
   uploadUrl: PUBLIC ? '' : CONFIG.uploadUrl, uploadTime: CONFIG.uploadTime, uploadPassword: '', uploadOneTime: false, uploadAction: 'insert',
 };
@@ -2201,12 +2202,57 @@ function autosize() {
 }
 function updateSendBtn() { $('#btnSend').disabled = !$('#input').value.trim() || !S.connected; }
 
+// PrivateBin v2: encryption keys stay in the link fragment.
+let pasteUploading = false;
+async function uploadLongPaste() {
+  const inp = $('#input'), text = inp.value, b = activeBuf();
+  if (pasteUploading || !b) return;
+  pasteUploading = true;
+  try {
+    const host = new URL(settings.privatebinUrl.trim());
+    if (!['https:', 'http:'].includes(host.protocol) || host.username || host.password || host.search || host.hash) {
+      throw new Error('Set a valid PrivateBin HTTP(S) URL without credentials, query or fragment in Settings.');
+    }
+    toast('Uploading encrypted paste to ' + host.host + '…');
+    const bytes = n => crypto.getRandomValues(new Uint8Array(n));
+    const base64 = a => btoa(String.fromCharCode(...new Uint8Array(a)));
+    const secret = bytes(32), iv = bytes(16), salt = bytes(8);
+    const spec = [base64(iv), base64(salt), 100000, 256, 128, 'aes', 'gcm', 'none'];
+    const adata = [spec, 'plaintext', 0, 0], enc = new TextEncoder();
+    const material = await crypto.subtle.importKey('raw', secret, 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, material,
+      { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(JSON.stringify(adata)), tagLength: 128 },
+      key, enc.encode(JSON.stringify({ paste: text })));
+    const response = await fetch(host.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'JSONHttpRequest' },
+      body: JSON.stringify({ v: 2, adata, ct: base64(encrypted), meta: { expire: '1week' } }), signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new Error('Host returned ' + response.status);
+    const result = await response.json();
+    if (result.status !== 0 || !/^[a-f0-9]{16}$/i.test(result.id)) throw new Error(result.message || 'Invalid host response');
+    const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let number = BigInt('0x' + [...secret].map(v => v.toString(16).padStart(2, '0')).join('')), fragment = '';
+    while (number) { fragment = alphabet[Number(number % 58n)] + fragment; number /= 58n; }
+    for (const byte of secret) { if (byte) break; fragment = '1' + fragment; }
+    const url = host.href + '?' + result.id + '#' + fragment;
+    if (activeBuf() === b && inp.value === text) {
+      inp.value = url;
+      saveDraft(b, url);
+      autosize(); updateSendBtn();
+    } else {
+      toast('Paste uploaded: ' + url, { ms: 30000 });
+    }
+  } catch (error) {
+    toast('Paste upload failed; text kept in your draft. ' + error.message, { error: true, ms: 10000 });
+  } finally { pasteUploading = false; }
+}
+
 function submitInput() {
   const b = activeBuf();
   const inp = $('#input');
   const text = inp.value;
   if (!b || !text.trim()) return;
   if (!S.connected) { toast('Not connected', { error: true }); return; }
+  if (text.split(/\r\n|\r|\n/).length > 7) { uploadLongPaste(); return; }
   // Each line becomes its own message; make big pastes a deliberate choice.
   const lines = b.input_multiline ? [text] : text.split('\n').filter(l => l.trim());
   if (lines.length > PASTE_CONFIRM_LINES && S.confirmPaste !== text) {
@@ -3685,7 +3731,18 @@ function init() {
   $('#uploads').addEventListener('click', e => { const c = e.target.closest('[data-cancel-up]'); if (c) cancelUpload(+c.dataset.cancelUp); });
   inp.addEventListener('paste', e => {
     const files = [...(e.clipboardData?.files || [])];
-    if (!files.length || !uploadsEnabled()) return;
+    if (!files.length) {
+      const pasted = e.clipboardData?.getData('text/plain') || '';
+      if (pasted.split(/\r\n|\r|\n/).length > 7) {
+        e.preventDefault();
+        inp.setRangeText(pasted, inp.selectionStart, inp.selectionEnd, 'end');
+        saveDraft(activeBuf(), inp.value);
+        autosize(); updateSendBtn();
+        uploadLongPaste();
+      }
+      return;
+    }
+    if (!uploadsEnabled()) return;
     e.preventDefault();
     queueUploads(files.map(renamePasted));
   });

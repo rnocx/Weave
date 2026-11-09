@@ -220,6 +220,10 @@
         <div class="set-row"><div class="lbl"><b>Remember input history</b><small>Kept on this device for <kbd>↑</kbd>/<kbd>↓</kbd> recall. Lines that look like secrets (NickServ, /secure, /oper, channel keys, password options) are never saved.</small></div>
           <label class="switch"><input type="checkbox" data-setting="saveHistory"><span class="sw"></span></label></div>
       </div>
+      <div class="set-sec"><h3>Paste guard</h3>
+        <div class="set-row"><div class="lbl"><b>PrivateBin host</b><small>Pastes longer than 7 lines are encrypted and uploaded here. The link is added to your draft. Use a PrivateBin v2 host that allows uploads from this page via CORS. Pastes expire after one week.</small></div>
+          <input class="set-input" type="url" data-setting="privatebinUrl" placeholder="https://0bin.ch/" spellcheck="false" autocomplete="off" aria-label="PrivateBin host"></div>
+      </div>
       <div class="set-sec" id="setUploads"><h3>File uploads</h3>
         <div class="set-row"><div class="lbl"><b>Service</b><small>Files you attach, drop or paste are uploaded here, and the link is added to your message.</small></div>
           <select class="set-input" data-setting="uploadBackend">
