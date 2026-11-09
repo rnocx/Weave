@@ -107,6 +107,13 @@ Don't use ports 6665–6669 or 6697: browsers refuse to connect to them.
 It's three static files; keep them together in one folder. Pick one:
 
 - **Open it directly**: `index.html` via `file://` works against a `ws://` relay.
+- **Open it on Android**: use `index.html` from the built `weave.zip` download
+  (extract it first, then open it in a browser with JavaScript enabled).
+  That HTML embeds the styles and script, because Android file openers may not
+  give the browser access to neighboring files. The source `index.html` still
+  needs `weave.css` and `weave.js` beside it. A file preview that disables
+  JavaScript cannot run Weave; use the hosted app in that case. Local-file
+  relay authentication and uploads remain subject to browser security rules.
 - **Serve it locally**: `python3 -m http.server 8080`, then open
   <http://localhost:8080>.
 - **Host it behind your web server** (recommended). Serve the folder and
@@ -184,7 +191,9 @@ To host your own public copy:
 1. Build the public copy: `deploy/build-public.sh [source-url]`. It writes
    `deploy/dist/` with `CONFIG.mode` set to `'public'`, no Jirafeau default,
    and `weave.zip` (the app, for people who'd rather host it themselves or
-   open it locally).
+   open it locally). Requires Python 3 and zip. The zip's `index.html` embeds
+   the CSS and JavaScript for local opening, including on Android; the hosted
+   copy keeps the three files separate.
 2. Copy `deploy/dist/*` to the web root and use `deploy/Caddyfile` or
    `deploy/nginx.conf`. Both serve only the app's files over HTTPS, write no
    request logs, and send the security headers (`frame-ancestors 'none'`,

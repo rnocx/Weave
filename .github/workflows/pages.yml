@@ -1,32 +1,65 @@
-# Builds the public copy (deploy/build-public.sh) and publishes it to GitHub Pages.
-name: Pages
+name: Deploy website
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Check SSH access without uploading files
+        type: boolean
+        default: true
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: selfhosted-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - run: deploy/build-public.sh "https://github.com/${{ github.repository }}"
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: deploy/dist
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Build public site
+        run: deploy/build-public.sh "https://github.com/${{ github.repository }}"
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          test -n "$SSH_KEY"
+          test -n "$KNOWN_HOSTS"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Check server access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          ssh -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            'test -d /var/www/weave && test -w /var/www/weave'
+
+      - name: Upload website
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          scp -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            deploy/dist/index.html deploy/dist/weave.css \
+            deploy/dist/weave.js deploy/dist/weave.zip \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/weave/"
