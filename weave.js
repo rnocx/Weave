@@ -118,6 +118,7 @@ function toast(text, { error = false, ms = 3800, title = '', onClick = null } = 
    ═══════════════════════════════════════════════════════════════════════════ */
 /* ─── Deployment defaults — edit for your install ───────────────────────── */
 const CONFIG = {
+  version: 'development',                   // stamped from VERSION by the public build
   mode: 'personal',                          // 'personal' or 'public' (anyone connects to their own relay; see PUBLIC-HOSTING.md)
   uploadBackend: 'jirafeau',                 // 'jirafeau', 'litterbox', 'tmpfiles', 'filebin' or 'off'
   uploadUrl: 'https://files.interdo.me/',   // Jirafeau base URL
@@ -1997,7 +1998,7 @@ function renderNicklist() {
     }
     const col = nickCss(n.name, n.color);
     const away = /\b(away|darkgray|8)\b/.test(n.color_name || '') ? ' away' : '';
-    html += `<button class="nk${away}" type="button" data-nick="${esc(n.name)}">${avatar(n.name, col ? `color-mix(in srgb, ${col} 80%, #000)` : null)}` +
+    html += `<button class="nk${away}" type="button" data-nick="${esc(n.name)}">` +
       `<span class="nk-pf" style="${n.prefix_color ? 'color:' + (ansiFg(n.prefix_color) || 'inherit') : ''}">${esc((n.prefix || '').trim())}</span>` +
       `<span class="nk-name"${col ? ` style="color:${col}"` : ''}>${esc(n.name)}</span></button>`;
   }
@@ -2225,8 +2226,14 @@ async function uploadLongPaste() {
       { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
     const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(JSON.stringify(adata)), tagLength: 128 },
       key, enc.encode(JSON.stringify({ paste: text })));
-    const response = await fetch(host.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'JSONHttpRequest' },
+    let response;
+    try {
+      response = await fetch(host.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'JSONHttpRequest' },
       body: JSON.stringify({ v: 2, adata, ct: base64(encrypted), meta: { expire: '1week' } }), signal: AbortSignal.timeout(30000) });
+    } catch (error) {
+      if (error.name === 'TimeoutError') throw new Error('The PrivateBin host took too long to respond.');
+      throw new Error('Could not reach the PrivateBin host from this page. It may block cross-origin uploads (CORS), even when its own website works. Check the browser console for details.');
+    }
     if (!response.ok) throw new Error('Host returned ' + response.status);
     const result = await response.json();
     if (result.status !== 0 || !/^[a-f0-9]{16}$/i.test(result.id)) throw new Error(result.message || 'Invalid host response');
@@ -3104,7 +3111,7 @@ function openDrawer(which) {
 function renderAbout() {
   const v = S.version;
   $('#verLabel').textContent = v ? 'WeeChat ' + v.weechat_version : '';
-  $('#aboutText').innerHTML = `Weave — a self-contained web client for the WeeChat API relay.<br>` +
+  $('#aboutText').innerHTML = `Weave <b>${esc(CONFIG.version)}</b> — a self-contained web client for the WeeChat API relay.<br>` +
     (PUBLIC ? `Served by <b>${esc(location.host || 'this site')}</b>, which stores nothing: settings, drafts and history stay in this browser, and it connects straight to your relay.<br>` : '') +
     (v ? `Connected to WeeChat <b>${esc(v.weechat_version)}</b>, relay API <b>${esc(v.relay_api_version)}</b>.` : 'Not connected.');
 }

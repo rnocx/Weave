@@ -1,14 +1,9 @@
 name: Deploy website
 
 on:
-  push:
-    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Check SSH access without uploading files
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -19,9 +14,20 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -eu
+          version=$(cat VERSION)
+          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          test "$RELEASE_TAG" = "v$version"
+
       - name: Build public site
         run: deploy/build-public.sh "https://github.com/${{ github.repository }}"
 
@@ -51,7 +57,7 @@ jobs:
             'test -d /var/www/weave && test -w /var/www/weave'
 
       - name: Upload website
-        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        if: github.event_name == 'release'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}

@@ -7,6 +7,11 @@ set -eu
 cd "$(dirname "$0")/.."
 out=deploy/dist
 src_url=${1:-}
+version=$(cat VERSION)
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+  echo 'build-public: VERSION must use major.minor.patch' >&2
+  exit 1
+}
 rm -rf "$out"
 mkdir -p "$out/zip/weave"
 
@@ -20,6 +25,7 @@ edit() {  # edit <file> <sed-expr> <check-regex>
 cp index.html weave.css "$out/zip/weave/"
 cp weave.js "$out/zip/weave/weave.js"
 js=$out/zip/weave/weave.js
+edit "$js" "s|^\(  version: \)'[^']*'|\1'$version'|" "^  version: '$version'"
 edit "$js" "s|^\(  mode: \)'personal'|\1'public'|" "^  mode: 'public'"
 edit "$js" "s|^\(  uploadUrl: \)'[^']*'|\1''|" "^  uploadUrl: ''"
 if [ -n "$src_url" ]; then

@@ -520,7 +520,6 @@ select.set-input{appearance:none;padding-right:30px;background-image:linear-grad
 .nk{display:flex;align-items:center;gap:9px;width:100%;height:30px;padding:0 8px;border:0;border-radius:var(--radius-sm);background:transparent;
   cursor:pointer;text-align:left;font-size:13.5px;content-visibility:auto;contain-intrinsic-size:auto 30px}
 .nk:hover{background:var(--bg-hover)}
-.nk .avatar{width:22px;height:22px;font-size:11px}
 .nk-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
 .nk-pf{font:600 12px var(--font-mono);color:var(--muted);width:10px;text-align:center;flex:none}
 .nk.away{opacity:.5}

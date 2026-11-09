@@ -476,3 +476,20 @@ Media previews load images from the linked hosts, so they're off by default
   close frame and is harmless.
 - Tested against WeeChat 4.9.0 (relay API 0.4.1) and 4.9.3. The command
   palette's descriptions come from WeeChat 4.9's `/help`.
+
+### Website releases
+
+The website version is stored in `VERSION`, starting at `1.0.0`. Increment the
+patch number for fixes, minor number for new features, and major number for
+breaking changes. Update the changelog and commit the version with the release changes.
+
+To deploy, publish a GitHub release with a matching tag, such as `v1.0.0`,
+pointing at that commit. The workflow builds the tagged code and deploys over
+SSH on port 2222. Drafts, prereleases, and pushes to main do not deploy.
+Tags must match VERSION exactly or deployment stops.
+
+Manual runs under Actions → Deploy website → Run workflow only build and
+check SSH access; they never upload files. Configure the repository secrets
+`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, and `DEPLOY_KNOWN_HOSTS` first.
+The server must serve `/var/www/weave`, and the deployment user must be able
+to write there.

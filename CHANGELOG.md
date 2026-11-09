@@ -1,7 +1,23 @@
 # Changelog
 
-Notable changes to Weave, newest first. Weave has no version numbers yet, so
-entries are grouped by date. The Mac app is version 1.0 throughout.
+Notable changes to Weave, newest first. Website releases use semantic versions
+from VERSION and matching GitHub release tags (for example, v1.0.0).
+Older entries are grouped by date. The Mac app has its own version.
+
+## 1.0.0 — 2026-11-09
+
+### Added
+- Configurable PrivateBin paste guard for messages longer than seven lines.
+- GitHub repository link in the landing-page footer.
+- Website release version in Settings → About.
+- Deployment over SSH on port 2222 when a stable GitHub release is published,
+  with version-tag validation and manual checks that do not upload files.
+
+### Changed
+- Removed letter avatars from the member list while retaining nick colors,
+  role prefixes, and away indicators.
+- Improved paste-upload connection error messages.
+- Downloadable HTML includes its styles and script for local opening on Android.
 
 ## 2026-10-25
 
