@@ -11,6 +11,9 @@ Older entries are grouped by date. The Mac app has its own version.
   the open channel, and your own typing is sent to WeeChat while you write.
   Needs relay API 0.8.0 or newer. On older relays Weave gives up after the
   first 404. Settings → Behaviour has a switch, on by default.
+- **Experimental TOTP login** for relays running the totp-websocket branch of
+  WeeChat. Tick TOTP on the connection form and enter the six-digit code beside
+  the password. It needs TLS, and codes are never saved.
 
 ### Fixed
 - Flipping a switch in Settings could scroll the dialog off screen. The next

@@ -594,6 +594,9 @@ function hostHint(host) {
 async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
   clearTimeout(S.reconnectTimer);
   clearInterval(S.countdown);
+  if (cfg.totpEnabled && (!cfg.tls || !/^[0-9]{6}$/.test(cfg.totp || ''))) {
+    return connectFailed('Experimental TOTP requires TLS and a fresh six-digit authenticator code.');
+  }
   S.cfg = cfg;
   S.userClosed = false;
   S.connecting = true;
@@ -606,7 +609,9 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
 
   let ws;
   try {
-    ws = new WebSocket(urls.ws, ['api.weechat', 'base64url.bearer.authorization.weechat.' + b64url(creds)]);
+    const protocols = ['api.weechat', 'base64url.bearer.authorization.weechat.' + b64url(creds)];
+    if (cfg.totpEnabled) protocols.push('totp.weechat.' + cfg.totp);
+    ws = new WebSocket(urls.ws, protocols);
   } catch (e) { S.connecting = false; return connectFailed(esc('Could not open WebSocket: ' + e.message)); }
   S.ws = ws;
   let opened = false;
@@ -653,6 +658,13 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
 }
 
 async function handleConnectFailure(cfg, urls, { hashed, forcePlain }) {
+  if (cfg.totpEnabled) {
+    cfg.totp = '';
+    $('#cTotp').value = '';
+    backToLogin('Experimental TOTP login failed. Enter a fresh code and check your password, device clock, and relay support for totp-websocket.');
+    $('#cTotp').focus();
+    return;
+  }
   const probe = await probeRelay(cfg, urls, forcePlain);
   if (S.userClosed || S.ws || S.connecting) return;   // superseded while probing
   // Clock drift: over TLS it's safe to retry once with the plain password.
@@ -677,6 +689,13 @@ function connectFailed(html) {
 
 const STUCK_AFTER = 5;   // failed reconnects before we say so and offer the login screen
 function scheduleReconnect() {
+  if (S.cfg?.totpEnabled) {
+    S.cfg.totp = '';
+    $('#cTotp').value = '';
+    backToLogin('Enter a fresh authenticator code to reconnect (Experimental TOTP).');
+    $('#cTotp').focus();
+    return;
+  }
   clearTimeout(S.reconnectTimer);
   clearInterval(S.countdown);
   const delay = S.reconnectDelay * (0.8 + Math.random() * 0.4);
@@ -817,10 +836,11 @@ function onConnected() {
   S.noTyping = false;
   S.cmdNames = null;   // the relay's command list (palette), fetched again on first use
   const cfg = S.cfg;
-  const saved = { host: cfg.host, port: cfg.port, tls: cfg.tls, path: cfg.path, auth: cfg.auth, remember: cfg.remember, auto: cfg.auto };
+  const saved = { host: cfg.host, port: cfg.port, tls: cfg.tls, path: cfg.path, auth: cfg.auth, totpEnabled: !!cfg.totpEnabled, remember: cfg.remember, auto: cfg.totpEnabled ? false : cfg.auto };
   if (!nativeSecrets) { if (cfg.remember) saved.password = cfg.password; }
   else if (cfg.remember) nativeSecrets.set(secretKey(cfg), cfg.password).catch(() => toast('Could not save the password in the Keychain', { error: true }));
   else nativeSecrets.del(secretKey(cfg)).catch(() => {});
+  if (cfg.totpEnabled) { cfg.totp = ''; $('#cTotp').value = ''; }
   store.set('conn', saved);
   setConnecting(false);
   showBanner(null);
@@ -3438,6 +3458,8 @@ function readConnectForm() {
     auto: $('#cAuto').checked,
     path: $('#cPath').value.trim() || '/api',
     auth: $('#cAuth').value,
+    totpEnabled: $('#cTotpEnabled').checked,
+    totp: $('#cTotp').value.trim(),
   };
 }
 
@@ -3501,6 +3523,18 @@ function init() {
   $('#cTls').checked = saved?.tls ?? (PUBLIC || location.protocol === 'https:');
   $('#cPath').value = saved?.path ?? '/api';
   $('#cAuth').value = saved?.auth ?? 'auto';
+  $('#cTotpEnabled').checked = !!saved?.totpEnabled;
+  const updateTotpForm = () => {
+    const enabled = $('#cTotpEnabled').checked;
+    $('#cTotpField').hidden = !enabled;
+    $('#cTotp').required = enabled;
+    $('#cTotp').disabled = !enabled;
+    $('#cAuto').disabled = enabled;
+    if (enabled) $('#cAuto').checked = false;
+    else $('#cTotp').value = '';
+  };
+  $('#cTotpEnabled').addEventListener('change', updateTotpForm);
+  updateTotpForm();
   $('#cRemember').checked = !!saved?.remember;
   $('#cAuto').checked = !!saved?.auto;
   if (nativeSecrets?.label) $('#cRemember').nextElementSibling.nextElementSibling.textContent = nativeSecrets.label;

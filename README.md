@@ -500,3 +500,16 @@ check SSH access; they never upload files. Configure the repository secrets
 `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, and `DEPLOY_KNOWN_HOSTS` first.
 The server must serve `/var/www/weave`, and the deployment user must be able
 to write there.
+
+### Experimental TOTP authentication
+
+Enable **TOTP (Experimental)** on the connection form when using the
+[WeeChat totp-websocket branch](https://github.com/rnocx/weechat/tree/totp-websocket)
+with TOTP configured on the relay. Enter the six-digit authenticator code
+alongside your relay password. TLS is required. Weave sends the code through
+the branch's `totp.weechat.<code>` WebSocket subprotocol.
+
+Codes are never saved and are cleared after successful or rejected login.
+Automatic connection is disabled in this mode; after a disconnect, enter a
+fresh code to reconnect. This feature is experimental and requires that
+branch's relay support.

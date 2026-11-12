@@ -40,6 +40,11 @@
       <label class="field"><span>Relay password</span>
         <div class="pw"><input id="cPass" type="password" autocomplete="current-password"><button type="button" id="cPassToggle">Show</button></div>
       </label>
+      <label class="switch"><input type="checkbox" id="cTotpEnabled"><span class="sw"></span><span>TOTP (Experimental)</span></label>
+      <label class="field" id="cTotpField" hidden><span>Authenticator code</span>
+        <input id="cTotp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" aria-describedby="cTotpHint">
+        <small id="cTotpHint">Requires the experimental WeeChat totp-websocket branch. Enter a fresh six-digit code for each connection. Codes are never saved.</small>
+      </label>
       <div class="toggles">
         <label class="switch"><input type="checkbox" id="cTls"><span class="sw"></span><span>Use TLS (wss://)</span></label>
         <label class="switch"><input type="checkbox" id="cRemember"><span class="sw"></span><span>Remember password on this device (stored unencrypted)</span></label>
