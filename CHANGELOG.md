@@ -4,6 +4,18 @@ Notable changes to Weave, newest first. Website releases use semantic versions
 from VERSION and matching GitHub release tags (for example, v1.0.0).
 Older entries are grouped by date. The Mac app has its own version.
 
+## Unreleased
+
+### Added
+- **Typing notifications.** A label above the message box says who is typing in
+  the open channel, and your own typing is sent to WeeChat while you write.
+  Needs relay API 0.8.0 or newer. On older relays Weave gives up after the
+  first 404. Settings → Behaviour has a switch, on by default.
+
+### Fixed
+- Flipping a switch in Settings could scroll the dialog off screen. The next
+  click then closed it and left the page blurred.
+
 ## 1.0.0 — 2026-11-09
 
 ### Added

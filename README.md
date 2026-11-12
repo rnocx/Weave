@@ -73,6 +73,10 @@ external requests.
   options
 - Read-state sync: clears WeeChat's hotlist and moves its read marker as you
   read. Optionally switches WeeChat's current buffer too
+- Typing notifications: a label above the message box names who is typing, and
+  your own typing goes back to WeeChat. Slash commands don't count. Needs a
+  relay with API 0.8.0 or newer (WeeChat 5.0.0-dev at the time of writing). One
+  switch in Settings turns it off
 - Desktop notifications for highlights and private messages; unread count in
   the page title and favicon. Notifications can be dismissed (× on in-app
   ones) and are cleared when you open their buffer
