@@ -140,6 +140,7 @@
     </div>
     <div id="dropZone" class="drop" hidden><div><span class="big-i"><svg data-i="upload"></svg></span>Drop to upload<small id="dropHost"></small></div></div>
     <div class="composer-wrap">
+      <div id="typingBar" class="typing-bar" aria-live="polite" hidden></div>
       <div id="uploads" class="uploads" hidden></div>
       <div class="composer">
         <button id="btnAttach" class="icon-btn attach-btn" type="button" title="Upload files" hidden><svg class="i" data-i="clip"></svg></button>
@@ -213,6 +214,8 @@
       <div class="set-sec"><h3>Behaviour</h3>
         <div class="set-row"><div class="lbl"><b>Desktop notifications</b><small>On highlights and private messages</small></div>
           <label class="switch"><input type="checkbox" data-setting="notify"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>Typing notifications</b><small>Show who is typing and tell others when you are (needs a WeeChat with relay typing support)</small></div>
+          <label class="switch"><input type="checkbox" data-setting="typing"><span class="sw"></span></label></div>
         <div class="set-row"><div class="lbl"><b>Sync read state with WeeChat</b><small>Clear WeeChat's hotlist and move its read marker as you read</small></div>
           <label class="switch"><input type="checkbox" data-setting="syncRead"><span class="sw"></span></label></div>
         <div class="set-row"><div class="lbl"><b>Follow in WeeChat</b><small>Switch WeeChat's current buffer when you switch here</small></div>

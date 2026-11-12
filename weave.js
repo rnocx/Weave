@@ -152,7 +152,7 @@ const ACCENTS = { indigo: '#6470f3', violet: '#8b5cf6', teal: '#119e9e', green: 
 const DEFAULTS = {
   theme: 'system', darkTheme: 'weave', lightTheme: 'weave', accent: 'auto', font: 'sans', fontSize: '14', density: 'comfortable', clock: '24',
   groupMessages: true, smartFilter: true, hideJoins: false, media: 'click', nicklist: true,
-  notify: false, syncRead: true, syncCurrent: false, saveHistory: true,
+  notify: false, typing: true, syncRead: true, syncCurrent: false, saveHistory: true,
   privatebinUrl: 'https://0bin.ch/',
   uploadBackend: PUBLIC ? 'off' : CONFIG.uploadBackend, litterboxTime: '24h', tmpfilesTime: '1h',
   uploadUrl: PUBLIC ? '' : CONFIG.uploadUrl, uploadTime: CONFIG.uploadTime, uploadPassword: '', uploadOneTime: false, uploadAction: 'insert',
@@ -814,6 +814,7 @@ function onConnected() {
   const first = !S.everConnected;
   S.quitting = false;
   S.everConnected = true;
+  S.noTyping = false;
   S.cmdNames = null;   // the relay's command list (palette), fetched again on first use
   const cfg = S.cfg;
   const saved = { host: cfg.host, port: cfg.port, tls: cfg.tls, path: cfg.path, auth: cfg.auth, remember: cfg.remember, auto: cfg.auto };
@@ -834,7 +835,7 @@ function onConnected() {
   // startup light for accounts with many or very large channels.
   request('GET', `/api/buffers?lines=-${PREVIEW_LINES}&nicks=false&colors=ansi`).then(r => onBuffersLoaded(r.body || [])).catch(e => toast('Failed to load buffers: ' + e.message, { error: true }));
   request('GET', '/api/hotlist').then(r => applyHotlist(r.body || [])).catch(() => {});
-  request('POST', '/api/sync', { sync: true, nicks: true, input: false, colors: 'ansi' }).catch(() => {});
+  request('POST', '/api/sync', { sync: true, nicks: true, input: false, typing: true, colors: 'ansi' }).catch(e => console.warn('[weave] sync failed:', e.message));
 
   startHeartbeat();
 }
@@ -1010,6 +1011,26 @@ function handleEvent(msg) {
       if (b.id === S.active) scheduleRerender();
       break;
     }
+    case 'typing_set_nick': {
+      const b = S.buffers.get(bid);
+      if (!b || !body || !body.nick || body.nick === b.lv.nick) return;
+      if (!b.typers) b.typers = new Map();
+      clearTimeout(b.typers.get(body.nick));
+      if (body.state === 'active' || body.state === 'paused') {
+        // WeeChat clears stale states itself; this is only a safety net.
+        b.typers.set(body.nick, setTimeout(() => { b.typers.delete(body.nick); renderTyping(); }, 30000));
+      } else b.typers.delete(body.nick);
+      if (b.id === S.active) renderTyping();
+      break;
+    }
+    case 'typing_reset_buffer': {
+      const b = S.buffers.get(bid);
+      if (!b || !b.typers) return;
+      for (const t of b.typers.values()) clearTimeout(t);
+      b.typers.clear();
+      if (b.id === S.active) renderTyping();
+      break;
+    }
     case 'nicklist_nick_added': case 'nicklist_nick_changed': {
       const b = S.buffers.get(bid);
       if (!b || !body || !b.nicksLoaded) return;   // members not loaded yet: fetched fresh on open
@@ -1122,6 +1143,7 @@ function activate(id, { force = false } = {}) {
   if (prev && prev.id === id && !force) { closeDrawers(); return; }
   if (prev && prev.id !== id) {
     saveDraft(prev, $('#input').value);
+    stopTyping();
     const lastLine = prev.lines[prev.lines.length - 1];
     if (lastLine) prev.lastReadId = lastLine.id;
     if (settings.syncRead && S.connected) sendInput(prev, '/buffer set unread');
@@ -1381,6 +1403,7 @@ function renderComposer() {
   const b = activeBuf();
   const nick = b?.lv.nick || '';
   $('#myNick').textContent = nick;
+  renderTyping();
   const host = uploadsEnabled() ? uploadHost() : '';
   $('#btnAttach').hidden = !host;
   $('#btnAttach').title = host ? `Upload files to ${host} (or drop / paste them)` : '';
@@ -2274,6 +2297,7 @@ function submitInput() {
   saveHistory();
   S.histPos = -1;
   S.confirmPaste = null;
+  stopTyping('sent');
   for (const line of lines) sendInput(b, line);
   noteSwitchIntent(b, text.trim());
   inp.value = '';
@@ -2294,6 +2318,39 @@ function cancelPasteConfirm() {
   S.confirmPaste = null;
   setHint('');
   return true;
+}
+
+/* ─── Typing notifications ─────────────────────────────────────────────── */
+function renderTyping() {
+  const el = $('#typingBar');
+  const b = activeBuf();
+  const names = settings.typing && b?.typers ? [...b.typers.keys()] : [];
+  let text = '';
+  if (names.length === 1) text = `${names[0]} is typing…`;
+  else if (names.length === 2) text = `${names[0]} and ${names[1]} are typing…`;
+  else if (names.length > 2) text = 'Several people are typing…';
+  el.textContent = text;
+  el.hidden = !text;
+}
+const TYPING_REFRESH = 5000, TYPING_PAUSE = 4000;
+const typingOut = { id: null, state: 'done', at: 0, timer: null };
+function sendTyping(b, state) {
+  if (!b || !S.connected || !settings.typing || S.noTyping) return;
+  typingOut.state = state; typingOut.at = Date.now(); typingOut.id = state === 'done' || state === 'sent' ? null : b.id;
+  request('POST', '/api/typing', { buffer_id: +b.id, state }).catch(e => { if (e.msg?.code === 404) S.noTyping = true; });   // relay without typing support: stop trying
+}
+function noteTyping() {
+  const b = activeBuf();
+  const v = $('#input').value;
+  clearTimeout(typingOut.timer);
+  // Slash commands and empty boxes are not "typing".
+  if (!b || !v.trim() || v.startsWith('/')) { if (typingOut.id) sendTyping(S.buffers.get(typingOut.id), 'done'); return; }
+  if (typingOut.id !== b.id || typingOut.state !== 'active' || Date.now() - typingOut.at > TYPING_REFRESH) sendTyping(b, 'active');
+  typingOut.timer = setTimeout(() => { if (typingOut.id === b.id) sendTyping(b, 'paused'); }, TYPING_PAUSE);
+}
+function stopTyping(state = 'done') {
+  clearTimeout(typingOut.timer);
+  if (typingOut.id) sendTyping(S.buffers.get(typingOut.id), state);
 }
 
 function setHint(html) { $('#composerHint').innerHTML = html; }
@@ -3722,6 +3779,7 @@ function init() {
     saveDraft(activeBuf(), inp.value);
     if (S.confirmPaste != null && inp.value !== S.confirmPaste) cancelPasteConfirm();
     autosize(); updateSendBtn();
+    noteTyping();
     // A lone "/" offers the command palette.
     const lone = inp.value === '/' && S.confirmPaste == null;
     if (lone) setHint(`<button class="cmd-hint" type="button" data-palette>Browse commands… <kbd>${navigator.platform.startsWith('Mac') ? '⇧⌘P' : 'Ctrl Shift P'}</kbd></button>`);
@@ -3815,7 +3873,13 @@ function init() {
   // Settings dialog
   const sd = $('#settingsDlg');
   sd.addEventListener('click', e => {
-    if (e.target === sd || e.target.closest('[data-close]')) { sd.close(); return; }
+    // Backdrop click: the target is the <dialog> itself and the pointer is really
+    // outside the panel (not a synthetic click forwarded from a label to its input).
+    const box = $('.dlg', sd)?.getBoundingClientRect();
+    const outside = !box || e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom;
+    if ((e.target === sd && e.detail > 0 && outside) || e.target.closest?.('[data-close]')) {
+      sd.close(); return;
+    }
     const seg = e.target.closest('.seg button');
     if (seg) { setSetting(seg.parentElement.dataset.setting, seg.dataset.v); return; }
     const sw = e.target.closest('[data-accent]');
