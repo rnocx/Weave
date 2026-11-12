@@ -3,7 +3,7 @@
 # Weave
 
 A self-contained web client for [WeeChat](https://weechat.org/)'s **API relay**
-(WeeChat ≥ 4.0). The whole app is three static files — `index.html`,
+(WeeChat ≥ 4.3). The whole app is three static files — `index.html`,
 `weave.css` and `weave.js` — with no build step, no dependencies, and no
 external requests.
 
@@ -96,6 +96,9 @@ external requests.
 - Works on phones (portrait and landscape): see [On phones](#on-phones)
 
 ## WeeChat setup
+
+Requires **WeeChat 4.3 or newer**. The API relay was introduced in WeeChat 4.3;
+earlier versions are not supported.
 
 ```
 /set relay.network.password "a-strong-password"
