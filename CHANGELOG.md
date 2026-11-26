@@ -4,6 +4,28 @@ Notable changes to Weave, newest first. Website releases use semantic versions
 from VERSION and matching GitHub release tags (for example, v1.0.0).
 Older entries are grouped by date. The Mac app has its own version.
 
+## Unreleased
+
+### Added
+- Script buffer toolbar for loading, unloading, reloading, autoload, holds,
+  installation, and removal. Select rows by mouse, touch, or keyboard. Confirm
+  before installing, removing, or enabling downloads.
+- Appearance setting to replace private message initials with person outlines
+  in the buffer list.
+- Resizable member list that remembers its width. Double-click the resize
+  handle to fit the longest nickname again.
+
+### Fixed
+- Release deployment checks and replaces `weave.zip` before uploading the
+  website, then verifies all four files on the server. The download URL includes
+  the release version so browsers don't reuse an older cached ZIP.
+- TOTP login text now describes upstream support and older relays behind a
+  proxy configured to translate WebSocket TOTP codes.
+- Typing notifications accept upstream WeeChat's event names as well as the
+  original experimental names.
+- Settings and documentation give the typing requirement as WeeChat 5.0.0
+  development builds with relay typing support, rather than relay API 0.8.0.
+
 ## 1.1.0 — 2026-11-12
 
 ### Added

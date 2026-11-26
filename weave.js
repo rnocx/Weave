@@ -41,6 +41,7 @@ async function loadPassword(saved) {
 }
 
 const ICONS = {
+  user: '<path d="M19 21v-2a7 7 0 0 0-14 0v2"/><circle cx="12" cy="7" r="4"/>',
   github: '<path d="M9 19c-4.3 1.3-4.3-2.2-6-2.7m12 5v-3.4a3 3 0 0 0-.8-2.3c2.7-.3 5.6-1.3 5.6-6A4.7 4.7 0 0 0 18.5 6a4.3 4.3 0 0 0-.1-3.6s-1-.3-3.7 1.4a12.8 12.8 0 0 0-6.7 0C5.4 2.1 4.4 2.4 4.4 2.4A4.3 4.3 0 0 0 4.3 6 4.7 4.7 0 0 0 3 9.6c0 4.7 2.9 5.7 5.6 6a3 3 0 0 0-.8 2.3v3.4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   hash: '<path d="M5 9h14M4 15h14M10 3 8 21M16 3l-2 18"/>',
@@ -151,7 +152,7 @@ const THEMES = {
 const ACCENTS = { indigo: '#6470f3', violet: '#8b5cf6', teal: '#119e9e', green: '#2f9e62', amber: '#d98a10', rose: '#e0527a', slate: '#64748b' };
 const DEFAULTS = {
   theme: 'system', darkTheme: 'weave', lightTheme: 'weave', accent: 'auto', font: 'sans', fontSize: '14', density: 'comfortable', clock: '24',
-  groupMessages: true, smartFilter: true, hideJoins: false, media: 'click', nicklist: true,
+  groupMessages: true, smartFilter: true, hideJoins: false, media: 'click', nicklist: true, privateAvatars: true,
   notify: false, typing: true, syncRead: true, syncCurrent: false, saveHistory: true,
   privatebinUrl: 'https://0bin.ch/',
   uploadBackend: PUBLIC ? 'off' : CONFIG.uploadBackend, litterboxTime: '24h', tmpfilesTime: '1h',
@@ -595,7 +596,7 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
   clearTimeout(S.reconnectTimer);
   clearInterval(S.countdown);
   if (cfg.totpEnabled && (!cfg.tls || !/^[0-9]{6}$/.test(cfg.totp || ''))) {
-    return connectFailed('Experimental TOTP requires TLS and a fresh six-digit authenticator code.');
+    return connectFailed('TOTP requires TLS and a fresh six-digit authenticator code.');
   }
   S.cfg = cfg;
   S.userClosed = false;
@@ -661,7 +662,7 @@ async function handleConnectFailure(cfg, urls, { hashed, forcePlain }) {
   if (cfg.totpEnabled) {
     cfg.totp = '';
     $('#cTotp').value = '';
-    backToLogin('Experimental TOTP login failed. Enter a fresh code and check your password, device clock, and relay support for totp-websocket.');
+    backToLogin('TOTP login failed. Enter a fresh code and check your password and device clock. Browser TOTP requires WeeChat 5.0.0 with WebSocket TOTP support, or a TOTP-compatible proxy for older relays.');
     $('#cTotp').focus();
     return;
   }
@@ -692,7 +693,7 @@ function scheduleReconnect() {
   if (S.cfg?.totpEnabled) {
     S.cfg.totp = '';
     $('#cTotp').value = '';
-    backToLogin('Enter a fresh authenticator code to reconnect (Experimental TOTP).');
+    backToLogin('Enter a fresh authenticator code to reconnect (TOTP).');
     $('#cTotp').focus();
     return;
   }
@@ -1010,7 +1011,9 @@ function handleEvent(msg) {
     case 'buffer_time_for_each_line_changed': case 'buffer_prefix_for_each_line_changed': {
       const b = S.buffers.get(bid || String(body?.id));
       if (!b || !body) return;
+      const oldScriptView = isScriptBuffer(b) ? [b.title, b.lv.filter] : null;
       updateBufferFields(b, body);
+      if (oldScriptView && (b.title !== oldScriptView[0] || b.lv.filter !== oldScriptView[1])) b.scriptSelY = null;
       renderSidebar();
       if (b.id === S.active) { renderHeader(); renderComposer(); }
       break;
@@ -1018,7 +1021,7 @@ function handleEvent(msg) {
     case 'buffer_cleared': {
       const b = S.buffers.get(bid);
       if (!b) return;
-      b.lines = []; b.hasMore = false;
+      b.lines = []; b.hasMore = false; b.scriptSelY = null;
       if (b.id === S.active) renderMessages();
       break;
     }
@@ -1031,7 +1034,7 @@ function handleEvent(msg) {
       if (b.id === S.active) scheduleRerender();
       break;
     }
-    case 'typing_set_nick': {
+    case 'typing_nick_changed': case 'typing_set_nick': {
       const b = S.buffers.get(bid);
       if (!b || !body || !body.nick || body.nick === b.lv.nick) return;
       if (!b.typers) b.typers = new Map();
@@ -1043,7 +1046,7 @@ function handleEvent(msg) {
       if (b.id === S.active) renderTyping();
       break;
     }
-    case 'typing_reset_buffer': {
+    case 'typing_buffer_reset': case 'typing_reset_buffer': {
       const b = S.buffers.get(bid);
       if (!b || !b.typers) return;
       for (const t of b.typers.values()) clearTimeout(t);
@@ -1317,7 +1320,7 @@ function markAllRead() {
 
 function bufIcon(b) {
   const lv = b.lv;
-  if (lv.type === 'private') return avatar(b.short_name || b.name);
+  if (lv.type === 'private') return settings.privateAvatars ? avatar(b.short_name || b.name) : ico('user');
   if (lv.type === 'channel') return ico('hash');
   if (lv.type === 'server') return ico('server');
   if (b.name === 'core.weechat') return ico('term');
@@ -1414,6 +1417,7 @@ function renderHeader() {
   f.title = on ? 'Join/part noise hidden (smart filter on) — click to show' : 'Showing all joins/parts — click to filter';
   $('#btnSearch').hidden = b.type === 'free';
   $('#fsetBar').hidden = b.lv.plugin !== 'fset';
+  renderScriptBar();
   const hasNl = !!b.nicklist;
   $('#btnMembers').hidden = !hasNl;
   document.title = titleText();
@@ -1432,11 +1436,13 @@ function renderComposer() {
     lv.type === 'channel' ? `Message #${bufLabel(b)}` :
     lv.type === 'private' ? `Message ${b.short_name}` :
     lv.plugin === 'fset' ? 'Filter options (e.g. relay.* or c:weechat.color.*), or type a command' :
+    isScriptBuffer(b) ? 'Filter scripts (words, tags, language), or type a command' :
     `Type a command for ${b.short_name || b.name}`;
   updateSendBtn();
 }
 
 function renderEmpty() {
+  $('#scriptBar').hidden = true;
   $('#msgs').innerHTML = `<div class="buf-empty"><div class="big">${ico('msg')}</div><h3>No buffer selected</h3><div>Pick a buffer from the sidebar.</div></div>`;
   $('#tbTitle').innerHTML = ''; $('#tbTopic').innerHTML = '';
 }
@@ -1488,7 +1494,10 @@ function newCtx(b) { return { buf: b, day: null, nick: null, date: 0, marker: fa
 
 function lineHtml(ctx, l) {
   const b = ctx.buf;
-  if (b.type === 'free') return `<div class="row free${b.lv.plugin === 'fset' ? ' clickable' : ''}" data-y="${esc(l.y)}">${renderAnsi(l.message) || '&nbsp;'}</div>`;
+  if (b.type === 'free') {
+    const scriptRow = isScriptBuffer(b) && scriptListCount(b) != null && l.y >= 0 && l.y < scriptListCount(b);
+    return `<div class="row free${b.lv.plugin === 'fset' || scriptRow ? ' clickable' : ''}" data-y="${esc(l.y)}"${scriptRow ? ' role="button" tabindex="0" aria-pressed="false"' : ''}>${renderAnsi(l.message) || '&nbsp;'}</div>`;
+  }
   let html = '';
   // Read marker goes before the first visible line after the last-read one.
   if (ctx.marker && !ctx.markerDone) { html += `<div class="marker">New</div>`; ctx.markerDone = true; }
@@ -1914,7 +1923,15 @@ function handleBufferKey(e) {
   if (!e.altKey && !e.ctrlKey && (typing || !/^(shift-)?(up|down|left|right|pgup|pgdn|home|end|f\d+)$/.test(name))) return false;
   const seq = S.keySeq && Date.now() - S.keySeq.at < 1500 ? S.keySeq.name + ',' + name : name;
   const hit = b.keys.find(k => k.key === seq);
-  if (hit) { e.preventDefault(); S.keySeq = null; runBufferCommand(b, hit.command); return true; }
+  if (hit) {
+    e.preventDefault(); S.keySeq = null;
+    if (isScriptBuffer(b)) {
+      const action = hit.command.match(/^\/script (show|load|unload|reload|toggleautoload|hold|install|remove|-up|-down)$/)?.[1];
+      if (action) scriptAction(action);
+      else runScriptCommand(b, splitCommands(hit.command));
+    } else runBufferCommand(b, hit.command);
+    return true;
+  }
   if (b.keys.some(k => k.key.startsWith(seq + ','))) { e.preventDefault(); S.keySeq = { name: seq, at: Date.now() }; return true; }
   S.keySeq = null;
   return false;
@@ -1961,6 +1978,7 @@ async function pullWeeChatInput(b) {
 // the whole row and keep it in view.
 function revealFreeSelection() {
   const b = activeBuf();
+  if (isScriptBuffer(b)) { revealScriptSelection(b); return; }
   if (b?.lv.plugin !== 'fset') return;
   const box = $('#msgs');
   box.querySelectorAll('.fset-sel').forEach(r => r.classList.remove('fset-sel'));
@@ -1992,6 +2010,126 @@ function fsetClick(b, y, edit = false) {
   if (edit || idx === selIdx) { runBufferCommand(b, idx === selIdx ? '/fset -set' : `/fset -go ${idx}; /fset -set`); return; }
   S.fsetSelY = y;   // optimistic: a second click edits even before WeeChat redraws
   runBufferCommand(b, `/fset -go ${idx}`);
+}
+
+// The title's displayed/total count distinguishes the list from details in
+// every locale. Columns are configurable, so don't parse filenames or status.
+function isScriptBuffer(b) { return b?.type === 'free' && b.lv.plugin === 'script' && b.lv.type === 'script'; }
+function scriptListCount(b) {
+  const m = stripAnsi(b.title || '').match(/(?:^|\D)(\d+)\/(\d+)(?:\D|$)/);
+  return m ? Number(m[1]) : null;
+}
+function selectedScriptLine(b) {
+  const count = scriptListCount(b);
+  return count != null && Number.isInteger(b.scriptSelY) && b.scriptSelY >= 0 && b.scriptSelY < count
+    ? b.lines.find(l => l.y === b.scriptSelY) : null;
+}
+function renderScriptBar() {
+  const b = activeBuf(), bar = $('#scriptBar');
+  bar.hidden = !isScriptBuffer(b);
+  if (bar.hidden) return;
+  const count = scriptListCount(b), line = selectedScriptLine(b);
+  $('#scriptSelection').textContent = b.scriptBusy ? 'Working…' : count == null ? 'Script details' :
+    count === 0 ? 'No matching scripts' : line ? `Script ${b.scriptSelY + 1} of ${count}` : 'Select a script';
+  for (const btn of $$('[data-script-action]', bar)) {
+    const action = btn.dataset.scriptAction;
+    const global = action === 'update' || action === 'enable';
+    const navigation = action === '-up' || action === '-down';
+    btn.disabled = !S.connected || !!b.scriptBusy || (!global &&
+      (count == null ? action !== 'show' : action === 'reset' ? false : navigation ? count === 0 : !line));
+    if (action === 'show') btn.textContent = count == null ? 'Back to list' : 'Details';
+  }
+  for (const row of $$('.row.free[role=button]', $('#msgs'))) {
+    const selected = !!line && +row.dataset.y === b.scriptSelY;
+    row.classList.toggle('script-sel', selected);
+    row.setAttribute('aria-pressed', String(selected));
+  }
+}
+function revealScriptSelection(b) {
+  const box = $('#msgs');
+  if (scriptListCount(b) == null) b.scriptSelY = null;
+  else if (!b.scriptBusy) {
+    const selected = $$('.row.free[role=button]', box).filter(r => r.firstElementChild?.style.background);
+    // Custom colours can hide the selected background or give every row one.
+    // When the background doesn't identify one row, use an explicit selection.
+    if (selected.length === 1) b.scriptSelY = +selected[0].dataset.y;
+    if (!selectedScriptLine(b)) b.scriptSelY = null;
+  }
+  renderScriptBar();
+  const sel = $('.script-sel', box);
+  if (sel) {
+    const rr = sel.getBoundingClientRect(), br = box.getBoundingClientRect();
+    if (rr.top < br.top || rr.bottom > br.bottom) sel.scrollIntoView({ block: 'nearest' });
+  }
+}
+async function runScriptCommand(b, commands, target = null) {
+  if (!isScriptBuffer(b) || !S.connected || b.scriptBusy) return;
+  b.scriptBusy = true;
+  renderScriptBar();
+  try {
+    // Use request directly: sendInput reports but swallows errors. A failed
+    // selection must stop the following action from acting on another script.
+    for (const command of commands) {
+      if (S.buffers.get(b.id) !== b || !S.connected) throw new Error('Script buffer is no longer available');
+      if (target && (b.title !== target.title || !b.lines.some(l => l.y === target.y && stripAnsi(l.message) === target.message))) {
+        throw new Error('The script list changed. Select the script again before continuing.');
+      }
+      await request('POST', '/api/input', { buffer_name: b.name, command });
+    }
+  } catch (e) { toast(e.message || 'Script command failed', { error: true }); }
+  finally { b.scriptBusy = false; renderScriptBar(); }
+}
+function scriptClick(b, y) {
+  if (b.scriptBusy || scriptListCount(b) == null || !b.lines.some(l => l.y === y) || y < 0 || y >= scriptListCount(b)) return;
+  b.scriptSelY = y;
+  runScriptCommand(b, [`/script -go ${y}`]);
+}
+let scriptConfirmation = null;
+function scriptAction(action) {
+  const b = activeBuf();
+  if (!isScriptBuffer(b) || !S.connected || b.scriptBusy) return;
+  const count = scriptListCount(b), line = selectedScriptLine(b);
+  if (action === 'enable' || ((action === 'install' || action === 'remove') && line)) {
+    scriptConfirmation = { b, action, y: line?.y, message: line?.message, title: b.title };
+    const enable = action === 'enable', remove = action === 'remove';
+    $('#scriptConfirmTitle').textContent = enable ? 'Enable script downloads?' : remove ? 'Remove selected script?' : 'Install / update selected script?';
+    $('#scriptConfirmText').textContent = enable
+      ? 'Allow WeeChat to download the script catalogue and scripts from its configured repository. This setting applies to all clients.'
+      : remove ? 'Unload this script and delete its file from your WeeChat server. Held scripts cannot be removed.'
+      : 'Download the repository copy to your WeeChat server. This replaces the installed file, including local edits. A loaded script will reload. A new script may load immediately, depending on the server’s autoload setting.';
+    $('#scriptConfirmRow').hidden = enable;
+    $('#scriptConfirmRow').textContent = enable ? '' : stripAnsi(line.message);
+    $('#scriptConfirmApply').textContent = enable ? 'Enable downloads' : remove ? 'Remove script' : 'Install / update';
+    $('#scriptConfirmDlg').showModal(); overlayOpened();
+    $('#scriptConfirmCancel').focus();
+    return;
+  }
+  if (action === 'update') { runScriptCommand(b, ['/script update']); return; }
+  if (action === 'show' && count == null) { runScriptCommand(b, ['/script show']); return; }
+  if (count == null) return;
+  if (action === 'reset') { b.scriptSelY = null; runScriptCommand(b, ['/script search *']); return; }
+  if ((action === '-up' || action === '-down') && count) {
+    if (line) scriptClick(b, clamp(line.y + (action === '-up' ? -1 : 1), 0, count - 1));
+    else runScriptCommand(b, [`/script ${action}`]);
+    return;
+  }
+  if (line && ['show', 'load', 'unload', 'reload', 'toggleautoload', 'hold'].includes(action)) {
+    // Explicit indexes also avoid WeeChat's implicit quiet mode for actions
+    // on its cursor, so refusals (held scripts, missing plugins) are reported.
+    runScriptCommand(b, [`/script -go ${line.y}`, `/script ${action} ${line.y}`],
+      { y: line.y, message: stripAnsi(line.message), title: b.title });
+  }
+}
+function confirmScriptAction() {
+  const c = scriptConfirmation;
+  $('#scriptConfirmDlg').close();
+  if (!c || activeBuf() !== c.b || S.buffers.get(c.b.id) !== c.b) return;
+  if (c.action !== 'enable' && (c.b.title !== c.title || !c.b.lines.some(l => l.y === c.y && l.message === c.message))) {
+    toast('The script list changed. Select the script again before continuing.', { error: true });
+    return;
+  }
+  runScriptCommand(c.b, c.action === 'enable' ? ['/script enable'] : [`/script -go ${c.y}`, `/script ${c.action} ${c.y}`],
+    c.action === 'enable' ? null : { y: c.y, message: stripAnsi(c.message), title: c.title });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2046,6 +2184,72 @@ function renderNicklist() {
       `<span class="nk-name"${col ? ` style="color:${col}"` : ''}>${esc(n.name)}</span></button>`;
   }
   $('#nlBody').innerHTML = html;
+  fitNicklistWidth();
+}
+
+let nicklistWidth = store.get('nickW', null);
+if (!Number.isFinite(nicklistWidth)) nicklistWidth = null;
+let nickMeasure;
+function fitNicklistWidth() {
+  const nl = $('#nicklist');
+  if (nl.hidden || !nl.getClientRects().length) return;
+  let width = nicklistWidth;
+  if (width == null) {
+    const sample = $('#nlBody .nk-name');
+    const style = getComputedStyle(sample || $('#nlBody'));
+    nickMeasure ||= document.createElement('canvas').getContext('2d');
+    nickMeasure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    let longest = 0;
+    for (const n of activeBuf()?.nicks.values() || []) {
+      if (n.visible !== false) longest = Math.max(longest, nickMeasure.measureText(n.name).width);
+    }
+    // Body + row padding, rank column, gap, border and possible scrollbar.
+    const body = $('#nlBody');
+    const scrollbar = body.offsetWidth - body.clientWidth;
+    width = Math.ceil(longest) + 52 + scrollbar;
+  }
+  const max = Math.max(96, Math.min(480, innerWidth * (innerWidth > 1080 ? 0.4 : 0.82)));
+  width = Math.round(clamp(width, nicklistWidth == null ? 0 : 96, max));
+  document.documentElement.style.setProperty('--nl-w', width + 'px');
+  $('#nickResize').setAttribute('aria-valuenow', width);
+  $('#nickResize').setAttribute('aria-valuemin', 0);
+  $('#nickResize').setAttribute('aria-valuemax', Math.floor(max));
+}
+
+function initNickResize() {
+  const handle = $('#nickResize'), app = $('#chatScreen');
+  const current = () => $('#nicklist').getBoundingClientRect().width;
+  const apply = width => { nicklistWidth = width; fitNicklistWidth(); };
+  const save = () => { nicklistWidth = Math.round(current()); store.set('nickW', nicklistWidth); };
+  handle.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX, startW = current();
+    handle.classList.add('dragging'); app.classList.add('resizing');
+    const move = ev => apply(startW + startX - ev.clientX);
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+      handle.classList.remove('dragging'); app.classList.remove('resizing');
+      save();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  });
+  const reset = () => { nicklistWidth = null; store.del('nickW'); fitNicklistWidth(); };
+  handle.addEventListener('dblclick', reset);
+  handle.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key === 'ArrowLeft') { apply(current() + step); save(); }
+    else if (e.key === 'ArrowRight') { apply(current() - step); save(); }
+    else if (e.key === 'Home') reset();
+    else return;
+    e.preventDefault();
+  });
+  window.addEventListener('resize', fitNicklistWidth);
 }
 // Join/part floods fire hundreds of events: rebuild at most every 150 ms,
 // stretching towards 1 s for very large channels.
@@ -3161,6 +3365,7 @@ function setConnStatus(kind, label, sub) {
   $('#connLabel').textContent = label;
   if (sub !== undefined) $('#connSub').textContent = sub;
   updateSendBtn();
+  renderScriptBar();
 }
 function showBanner(text, { login = false } = {}) {
   const bn = $('#banner');
@@ -3562,6 +3767,7 @@ function init() {
 
   // Sidebar
   initSideResize();
+  initNickResize();
   $('#bufList').addEventListener('click', e => {
     if (S.suppressClick) { S.suppressClick = false; e.preventDefault(); return; }   // the long-press already opened a menu
     if (e.target.closest('[data-markall]')) { markAllRead(); return; }
@@ -3736,6 +3942,7 @@ function init() {
     }
     const fr = e.target.closest('.row.free[data-y]');
     if (fr && activeBuf()?.lv.plugin === 'fset') { fsetClick(activeBuf(), +fr.dataset.y); return; }
+    if (fr && isScriptBuffer(activeBuf()) && !e.target.closest('a')) { scriptClick(activeBuf(), +fr.dataset.y); return; }
     const img = e.target.closest('.media img');
     if (img) window.open(img.dataset.full, '_blank', 'noopener');
   });
@@ -3775,6 +3982,20 @@ function init() {
     const b = activeBuf();
     if (btn && b) runBufferCommand(b, btn.dataset.cmd);
   });
+  box.addEventListener('keydown', e => {
+    const row = e.target.closest('.row.free[role=button]');
+    if (!row || !isScriptBuffer(activeBuf()) || e.target.closest('a') || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    scriptClick(activeBuf(), +row.dataset.y);
+  });
+  $('#scriptBar').addEventListener('click', e => {
+    const btn = e.target.closest('[data-script-action]');
+    if (btn && !btn.disabled) scriptAction(btn.dataset.scriptAction);
+  });
+  $('#scriptConfirmApply').addEventListener('click', confirmScriptAction);
+  $('#scriptConfirmCancel').addEventListener('click', () => $('#scriptConfirmDlg').close());
+  $('#scriptConfirmDlg [data-close]').addEventListener('click', () => $('#scriptConfirmDlg').close());
+  $('#scriptConfirmDlg').addEventListener('close', () => { scriptConfirmation = null; overlaysClosed(); });
 
   // Search
   const si = $('#searchInput');

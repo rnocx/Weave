@@ -37,10 +37,11 @@ sed 's|https://files.interdo.me/|https://files.example.com/|g' README.md > "$out
 
 # The hosted copy also links to the zip.
 cp "$out/zip/weave/index.html" "$out/zip/weave/weave.css" "$out/zip/weave/weave.js" "$out/"
-edit "$out/weave.js" "s|^\(  downloadUrl: \)'[^']*'|\1'weave.zip'|" "^  downloadUrl: 'weave.zip'"
+edit "$out/weave.js" "s|^\(  downloadUrl: \)'[^']*'|\1'weave.zip?v=$version'|" "^  downloadUrl: 'weave.zip?v=$version'"
 # Android file openers may grant access to only the selected HTML file.
 # Bundle the local entry point after copying the separate hosted files.
 python3 deploy/bundle-local.py "$out/zip/weave"
 (cd "$out/zip" && zip -qrX ../weave.zip weave)
 rm -rf "$out/zip"
+python3 deploy/verify-public.py "$out" "$version"
 ls -l "$out"

@@ -56,7 +56,27 @@ jobs:
             -o ConnectTimeout=15 "${DEPLOY_USER}@${DEPLOY_HOST}" \
             'test -d /var/www/weave && test -w /var/www/weave'
 
-      - name: Upload website
+      - name: Upload and verify download
+        if: github.event_name == 'release'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          checksum=$(sha256sum deploy/dist/weave.zip)
+          checksum=${checksum%% *}
+          # Verify the complete upload before replacing the public archive.
+          scp -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            deploy/dist/weave.zip \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/weave/.weave.zip.upload"
+          printf '%s  .weave.zip.upload\n' "$checksum" | \
+            ssh -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              'cd /var/www/weave && sha256sum -c - && mv -f .weave.zip.upload weave.zip'
+
+      - name: Upload and verify website
         if: github.event_name == 'release'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -67,5 +87,10 @@ jobs:
           test -n "$DEPLOY_USER"
           scp -P 2222 -o BatchMode=yes -o StrictHostKeyChecking=yes \
             deploy/dist/index.html deploy/dist/weave.css \
-            deploy/dist/weave.js deploy/dist/weave.zip \
+            deploy/dist/weave.js \
             "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/weave/"
+          # Fail the release if any served file differs from this build.
+          (cd deploy/dist && sha256sum index.html weave.css weave.js weave.zip) | \
+            ssh -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              'cd /var/www/weave && sha256sum -c -'

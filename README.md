@@ -20,6 +20,16 @@ external requests.
   </tr>
 </table>
 
+<details>
+  <summary>Settings and colour themes</summary>
+  <p><img src="docs/screenshots/settings.png" alt="Appearance settings with dark and light colour themes, accent colours, and chat font controls"></p>
+</details>
+
+<details>
+  <summary>Script manager controls</summary>
+  <p><img src="docs/screenshots/scripts.png" alt="WeeChat script buffer with clickable rows and controls for loading, autoload, holds, installation, removal, and catalogue refresh"></p>
+</details>
+
 <p align="center">
   <img src="docs/screenshots/phone.png" width="260" alt="Phone layout: stacked messages and the message box">
   &nbsp;&nbsp;
@@ -59,7 +69,11 @@ external requests.
   the 16 terminal colours IRC colours use, from iTerm2-Color-Schemes, and the
   theme's own accent unless you pick one
 - Member list with ranks (ops, voiced, …) and a nick menu (mention, query,
-  whois, kick/ban for ops)
+  whois, kick/ban for ops). Its width fits the longest nickname by default;
+  drag its left edge to resize, or double-click it to restore automatic sizing
+- Optional coloured initials for private messages in the buffer list
+  (Settings → Appearance → Private message avatars); turn them off to use
+  person outlines
 - **Server-side tab completion** via `POST /api/completion`: nicks, commands,
   channels and options, exactly as in WeeChat
 - Input history, multi-line input, per-buffer drafts
@@ -71,12 +85,23 @@ external requests.
   again to edit its value in the message box, a toolbar for touch screens
   (Edit, Toggle, −1/+1, Reset, Unset, Mark, Details), and typing filters the
   options
+- **Script manager controls:** open `/script`, then click or tap a row to
+  select it. Use the toolbar to view details, load, unload, reload, toggle
+  autoload, hold, install, update, or remove a script. Installing, removing,
+  and enabling downloads ask for confirmation. Autoload controls loading at
+  startup; it doesn't change whether a script is loaded now. Type words, tags,
+  or a language in the message box to filter; Reset filter restores the list.
+  Refresh catalogue updates WeeChat's cached repository list. WeeChat reports
+  errors, including held scripts, missing language plugins, and failed downloads.
+  If downloads are disabled and `/script` won't open a buffer, run
+  `/script enable`, then `/script` again.
 - Read-state sync: clears WeeChat's hotlist and moves its read marker as you
   read. Optionally switches WeeChat's current buffer too
 - Typing notifications: a label above the message box names who is typing, and
   your own typing goes back to WeeChat. Slash commands don't count. Needs a
-  relay with API 0.8.0 or newer (WeeChat 5.0.0-dev at the time of writing). One
-  switch in Settings turns it off
+  WeeChat 5.0.0 (currently a development build) with relay typing support,
+  and an IRC server that supports typing notifications. The relay API version
+  alone does not indicate support. One switch in Settings turns it off
 - Desktop notifications for highlights and private messages; unread count in
   the page title and favicon. Notifications can be dismissed (× on in-app
   ones) and are cleared when you open their buffer
@@ -464,6 +489,11 @@ Media previews load images from the linked hosts, so they're off by default
 
 ## Connection behaviour
 
+Relay typing support was added upstream on 18 November 2026 in
+[commit 0bc820ec](https://github.com/weechat/weechat/commit/0bc820ecd2f36cd403a9d81cb184351d2fe86787),
+while the relay API version remained 0.7.0. Older 5.0.0-dev builds may lack it.
+Sending typing status to IRC also requires `irc.look.typing_status_self` to be enabled.
+
 - The client pings the relay every 30 seconds and reconnects if there's no
   answer within 10. It also checks immediately when the tab becomes visible
   again or the network changes.
@@ -495,21 +525,48 @@ pointing at that commit. The workflow builds the tagged code and deploys over
 SSH on port 2222. Drafts, prereleases, and pushes to main do not deploy.
 Tags must match VERSION exactly or deployment stops.
 
+Each release rebuilds `weave.zip` and checks that it contains the same app as
+the website. Deployment uploads the ZIP under a temporary name and checks its
+SHA-256 checksum on the server before replacing `/var/www/weave/weave.zip`.
+It then uploads the website and verifies all four files. The download URL
+includes the release version (`weave.zip?v=1.1.0`, for example) so browsers don't
+reuse an older cached ZIP. The deployment server needs `sha256sum`.
+
 Manual runs under Actions → Deploy website → Run workflow only build and
 check SSH access; they never upload files. Configure the repository secrets
 `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, and `DEPLOY_KNOWN_HOSTS` first.
 The server must serve `/var/www/weave`, and the deployment user must be able
 to write there.
 
-### Experimental TOTP authentication
+### TOTP authentication
 
-Enable **TOTP (Experimental)** on the connection form when using the
-[WeeChat totp-websocket branch](https://github.com/rnocx/weechat/tree/totp-websocket)
-with TOTP configured on the relay. Enter the six-digit authenticator code
-alongside your relay password. TLS is required. Weave sends the code through
-the branch's `totp.weechat.<code>` WebSocket subprotocol.
+Enable **Two-factor authentication (TOTP)** on the connection form when TOTP
+is configured on the relay. Enter the six-digit authenticator code alongside
+your relay password. TLS is required. Weave sends the code through the
+`totp.weechat.<code>` WebSocket subprotocol.
+
+Browser TOTP support was added to **WeeChat 5.0.0** (currently development
+builds) on 11 November 2026 in
+[commit b46857db](https://github.com/weechat/weechat/commit/b46857dba37e2ba4ee571c7b7a3f3ae8e4467085).
+Older 5.0.0-dev builds may lack it; the experimental branch is no longer required.
 
 Codes are never saved and are cleared after successful or rejected login.
 Automatic connection is disabled in this mode; after a disconnect, enter a
-fresh code to reconnect. This feature is experimental and requires that
-branch's relay support.
+fresh code to reconnect.
+
+#### Older relays and reverse proxies
+
+Older relays accept TOTP in the `x-weechat-totp` request header. Browser
+JavaScript cannot set custom headers on a WebSocket connection, so Weave
+cannot send that header directly. A reverse proxy can extract the six-digit
+code from `totp.weechat.<code>` in
+`Sec-WebSocket-Protocol` and forward it as `x-weechat-totp` during the
+WebSocket upgrade. This needs explicit proxy configuration; ordinary reverse
+proxying alone does not add TOTP support. Weave connects the same way to a
+configured proxy and a newer relay.
+
+The unauthenticated `/api/handshake` response exposes `totp: true` when the
+relay requires TOTP. It does not advertise WebSocket TOTP support or proxy
+translation. Headers such as `Server` or `Via` cannot establish that the
+required translation is configured, so Weave doesn't try to detect proxies to
+choose how to send the code.

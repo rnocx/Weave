@@ -40,10 +40,10 @@
       <label class="field"><span>Relay password</span>
         <div class="pw"><input id="cPass" type="password" autocomplete="current-password"><button type="button" id="cPassToggle">Show</button></div>
       </label>
-      <label class="switch"><input type="checkbox" id="cTotpEnabled"><span class="sw"></span><span>TOTP (Experimental)</span></label>
+      <label class="switch"><input type="checkbox" id="cTotpEnabled"><span class="sw"></span><span>Two-factor authentication (TOTP)</span></label>
       <label class="field" id="cTotpField" hidden><span>Authenticator code</span>
         <input id="cTotp" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" aria-describedby="cTotpHint">
-        <small id="cTotpHint">Requires the experimental WeeChat totp-websocket branch. Enter a fresh six-digit code for each connection. Codes are never saved.</small>
+        <small id="cTotpHint">Use TLS with WeeChat 5.0.0 (currently development builds), or an older relay behind a TOTP-compatible proxy. Enter a fresh six-digit code for each connection. Codes are never saved.</small>
       </label>
       <div class="toggles">
         <label class="switch"><input type="checkbox" id="cTls"><span class="sw"></span><span>Use TLS (wss://)</span></label>
@@ -138,6 +138,22 @@
       <button class="pill-btn" type="button" data-cmd="/fset -mark" title="Mark the option (Alt+,)">Mark</button>
       <button class="pill-btn" type="button" data-cmd="/fset -format" title="Switch layout: show descriptions and defaults (Ctrl+X)">Details</button>
     </div>
+    <div id="scriptBar" class="tool-bar script-bar" role="toolbar" aria-label="Script actions" hidden>
+      <span id="scriptSelection" class="script-selection" aria-live="polite">Select a script</span>
+      <button class="icon-btn" type="button" data-script-action="-up" title="Previous script (↑)" aria-label="Previous script"><svg class="i" data-i="chevUp"></svg></button>
+      <button class="icon-btn" type="button" data-script-action="-down" title="Next script (↓)" aria-label="Next script"><svg class="i" data-i="chevDown"></svg></button>
+      <button class="pill-btn" type="button" data-script-action="show">Details</button>
+      <button class="pill-btn" type="button" data-script-action="load">Load</button>
+      <button class="pill-btn" type="button" data-script-action="unload">Unload</button>
+      <button class="pill-btn" type="button" data-script-action="reload">Reload</button>
+      <button class="pill-btn" type="button" data-script-action="toggleautoload" title="Toggle loading the script at WeeChat startup">Autoload</button>
+      <button class="pill-btn" type="button" data-script-action="hold" title="Hold / unhold: held scripts cannot be updated or removed">Hold / unhold</button>
+      <button class="pill-btn primary" type="button" data-script-action="install">Install / update…</button>
+      <button class="pill-btn" type="button" data-script-action="remove">Remove…</button>
+      <button class="pill-btn" type="button" data-script-action="reset">Reset filter</button>
+      <button class="pill-btn" type="button" data-script-action="update" title="Refresh WeeChat’s cached script catalogue">Refresh catalogue</button>
+      <button class="pill-btn" type="button" data-script-action="enable">Enable downloads…</button>
+    </div>
     <div class="msgs-wrap">
       <div id="msgs" class="msgs" role="log" aria-live="polite"></div>
       <button id="jump" class="jump" type="button" hidden><svg class="i" data-i="down"></svg><span></span></button>
@@ -160,7 +176,8 @@
   </main>
 
   <aside id="nicklist" class="nicklist" aria-label="Members">
-    <div class="nl-head">Members <span class="muted" id="nlCount"></span>
+    <div class="nick-resize" id="nickResize" role="separator" aria-orientation="vertical" aria-label="Resize member list" title="Drag to resize, double-click to fit nicknames" tabindex="0"></div>
+    <div class="nl-head"><span class="nl-title">Members</span> <span class="muted" id="nlCount"></span>
       <button class="icon-btn" id="btnNlClose" type="button" title="Close"><svg class="i" data-i="x"></svg></button></div>
     <div id="nlBody" class="nl-body"></div>
   </aside>
@@ -168,6 +185,16 @@
 </section>
 
 <!-- ═══════════════════════════ Dialogs ══════════════════════════════════ -->
+<dialog id="scriptConfirmDlg" aria-labelledby="scriptConfirmTitle">
+  <div class="dlg">
+    <div class="dlg-h"><h2 id="scriptConfirmTitle"></h2><button class="icon-btn" type="button" data-close title="Cancel" aria-label="Cancel"><svg class="i" data-i="x"></svg></button></div>
+    <div class="dlg-b script-confirm-body">
+      <p id="scriptConfirmText"></p>
+      <pre id="scriptConfirmRow"></pre>
+      <div class="script-confirm-actions"><button class="btn" id="scriptConfirmCancel" type="button">Cancel</button><button class="btn primary" id="scriptConfirmApply" type="button"></button></div>
+    </div>
+  </div>
+</dialog>
 <dialog id="switcherDlg" class="sw-dlg" aria-label="Jump to buffer">
   <div class="switcher">
     <div class="sw-in"><svg class="i" data-i="search"></svg><input id="swInput" placeholder="Jump to a buffer…" autocomplete="off" spellcheck="false"></div>
@@ -203,6 +230,8 @@
           <div class="seg" data-setting="density"><button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button></div></div>
         <div class="set-row"><div class="lbl"><b>Clock</b></div>
           <div class="seg" data-setting="clock"><button data-v="24">24h</button><button data-v="24s">24h:ss</button><button data-v="12">12h</button></div></div>
+        <div class="set-row"><div class="lbl"><b>Private message avatars</b><small>Show coloured initials in the buffer list. Turn off to use person outlines.</small></div>
+          <label class="switch"><input type="checkbox" data-setting="privateAvatars" aria-label="Private message avatars"><span class="sw"></span></label></div>
       </div>
       <div class="set-sec"><h3>Chat</h3>
         <div class="set-row"><div class="lbl"><b>Group consecutive messages</b><small>Show a nick once per run of messages</small></div>
@@ -219,7 +248,7 @@
       <div class="set-sec"><h3>Behaviour</h3>
         <div class="set-row"><div class="lbl"><b>Desktop notifications</b><small>On highlights and private messages</small></div>
           <label class="switch"><input type="checkbox" data-setting="notify"><span class="sw"></span></label></div>
-        <div class="set-row"><div class="lbl"><b>Typing notifications</b><small>Shows who is typing and lets others see when you are. Needs a relay with API 0.8.0 or newer.</small></div>
+        <div class="set-row"><div class="lbl"><b>Typing notifications</b><small>Shows who is typing and lets others see when you are. Requires WeeChat 5.0.0 (currently a development build) with relay typing support, and an IRC server that supports typing notifications.</small></div>
           <label class="switch"><input type="checkbox" data-setting="typing"><span class="sw"></span></label></div>
         <div class="set-row"><div class="lbl"><b>Sync read state with WeeChat</b><small>Clear WeeChat's hotlist and move its read marker as you read</small></div>
           <label class="switch"><input type="checkbox" data-setting="syncRead"><span class="sw"></span></label></div>
