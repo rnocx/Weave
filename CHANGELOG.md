@@ -4,7 +4,7 @@ Notable changes to Weave, newest first. Website releases use semantic versions
 from VERSION and matching GitHub release tags (for example, v1.0.0).
 Older entries are grouped by date. The Mac app has its own version.
 
-## Unreleased
+## 1.2.0 — 2026-11-26
 
 ### Added
 - Script buffer toolbar for loading, unloading, reloading, autoload, holds,
