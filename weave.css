@@ -593,6 +593,8 @@ dialog[open]{animation:pop .14s ease-out}
 .theme-card.on{box-shadow:0 0 0 2px var(--theme-accent)}
 .theme-card:focus-visible{outline:2px solid var(--theme-accent);outline-offset:2px}
 .about{font-size:12.5px;color:var(--muted);line-height:1.6}
+.app-update-actions{display:flex;flex-wrap:wrap;gap:8px}
+.connect-updates{margin-left:auto;flex-shrink:0}
 .kbd-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12.5px;color:var(--text-2);align-items:center}
 .kbd-grid span:nth-child(odd){text-align:right;white-space:nowrap}
 

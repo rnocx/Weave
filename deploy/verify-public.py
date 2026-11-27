@@ -14,6 +14,11 @@ def verify(root, version):
     hosted_js = (root / 'weave.js').read_text(encoding='utf-8')
     hosted_css = (root / 'weave.css').read_text(encoding='utf-8')
     hosted_html = (root / 'index.html').read_text(encoding='utf-8')
+    if f'<meta name="weave-version" content="{version}">' not in hosted_html:
+        raise ValueError('website must identify its release version')
+    for asset in ['href="weave.css', 'src="weave.js']:
+        if f'{asset}?v={version}"' not in hosted_html:
+            raise ValueError('website must use versioned CSS and JavaScript URLs')
     with ZipFile(root / 'weave.zip') as archive:
         damaged = archive.testzip()
         if damaged:
@@ -45,6 +50,8 @@ def verify(root, version):
     unbundled_html = unbundled_html.replace(
         '<!-- Only Weave\'s own script may run (the embedded script is hash-authorized).',
         '<!-- Only Weave\'s own script may run (no inline or injected scripts).', 1)
+    unbundled_html = unbundled_html.replace('href="weave.css"', f'href="weave.css?v={version}"', 1)
+    unbundled_html = unbundled_html.replace('src="weave.js"', f'src="weave.js?v={version}"', 1)
     if unbundled_html != hosted_html:
         raise ValueError('website HTML differs from the download')
 

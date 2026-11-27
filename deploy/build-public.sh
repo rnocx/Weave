@@ -23,6 +23,7 @@ edit() {  # edit <file> <sed-expr> <check-regex>
 }
 
 cp index.html weave.css "$out/zip/weave/"
+edit "$out/zip/weave/index.html" "s|name=\"weave-version\" content=\"development\"|name=\"weave-version\" content=\"$version\"|" "name=\"weave-version\" content=\"$version\""
 cp weave.js "$out/zip/weave/weave.js"
 js=$out/zip/weave/weave.js
 edit "$js" "s|^\(  version: \)'[^']*'|\1'$version'|" "^  version: '$version'"
@@ -37,6 +38,8 @@ sed 's|https://files.interdo.me/|https://files.example.com/|g' README.md > "$out
 
 # The hosted copy also links to the zip.
 cp "$out/zip/weave/index.html" "$out/zip/weave/weave.css" "$out/zip/weave/weave.js" "$out/"
+edit "$out/index.html" "s|href=\"weave.css\"|href=\"weave.css?v=$version\"|" "href=\"weave.css?v=$version\""
+edit "$out/index.html" "s|src=\"weave.js\"|src=\"weave.js?v=$version\"|" "src=\"weave.js?v=$version\""
 edit "$out/weave.js" "s|^\(  downloadUrl: \)'[^']*'|\1'weave.zip?v=$version'|" "^  downloadUrl: 'weave.zip?v=$version'"
 # Android file openers may grant access to only the selected HTML file.
 # Bundle the local entry point after copying the separate hosted files.

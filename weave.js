@@ -3395,6 +3395,55 @@ function renderAbout() {
   $('#aboutText').innerHTML = `Weave <b>${esc(CONFIG.version)}</b> — a self-contained web client for the WeeChat API relay.<br>` +
     (PUBLIC ? `Served by <b>${esc(location.host || 'this site')}</b>, which stores nothing: settings, drafts and history stay in this browser, and it connects straight to your relay.<br>` : '') +
     (v ? `Connected to WeeChat <b>${esc(v.weechat_version)}</b>, relay API <b>${esc(v.relay_api_version)}</b>.` : 'Not connected.');
+  const updates = $('#appUpdateRow');
+  if (updates) updates.hidden = !/^https?:$/.test(location.protocol);
+}
+
+// Fetch the page and its own assets before leaving the running app. A failed
+// download leaves the connection and drafts available for another attempt.
+async function refreshApp({ checkOnly = false } = {}) {
+  const check = $('#btnCheckUpdate'), refresh = $('#btnRefreshApp'), status = $('#appUpdateStatus');
+  if (check.disabled || !/^https?:$/.test(location.protocol)) return;
+  check.disabled = refresh.disabled = true;
+  status.textContent = checkOnly ? 'Checking for updates…' : 'Downloading app files…';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const url = new URL(location.href);
+    const hash = url.hash;
+    url.hash = '';
+    url.searchParams.set('weave-refresh', Date.now().toString());
+    const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    if (!response.ok) throw new Error(`Server returned HTTP ${response.status}`);
+    const html = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const version = html.querySelector('meta[name="weave-version"]')?.content;
+    if (!version) throw new Error('This server does not provide Weave update information');
+    if (checkOnly) {
+      status.textContent = version === CONFIG.version ? `You’re running the server’s current version (${version}).` :
+        `Server version: ${version}. You’re running ${CONFIG.version}. Tap Refresh app to load the server’s version.`;
+      return;
+    }
+    // The release HTML versions these URLs. Reload also refreshes unversioned
+    // assets on servers that host the source files directly.
+    for (const element of html.querySelectorAll('link[rel="stylesheet"][href], script[src]')) {
+      const asset = new URL(element.getAttribute('href') || element.getAttribute('src'), response.url);
+      if (asset.origin !== location.origin) throw new Error('App files must come from this server');
+      const file = await fetch(asset, { cache: 'reload', signal: controller.signal });
+      if (!file.ok) throw new Error(`Could not download ${asset.pathname} (HTTP ${file.status})`);
+      await file.arrayBuffer();
+    }
+    saveDraft(activeBuf(), $('#input').value);
+    clearTimeout(draftTimer);
+    store.set('drafts', drafts);
+    status.textContent = 'Reloading Weave…';
+    location.replace(url.href + hash);
+  } catch (error) {
+    status.textContent = (checkOnly ? 'Could not check for updates. ' : 'Could not refresh the app. ') +
+      (error.name === 'AbortError' ? 'The server took too long to respond.' : error.message) + ' The current app is still open.';
+  } finally {
+    clearTimeout(timer);
+    check.disabled = refresh.disabled = false;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3409,6 +3458,7 @@ function openSettings(section) {
   if (!d.open) { d.showModal(); overlayOpened(); }
   if (settings.uploadBackend === 'jirafeau') testUploadServer();
   if (section === 'uploads') { const body = $('#settingsDlg .dlg-b'); body.scrollTop = $('#setUploads').offsetTop - body.offsetTop; }
+  if (section === 'about') $('#aboutSec').scrollIntoView({ block: 'start' });
 }
 
 function syncSettingsUI() {
@@ -4122,6 +4172,14 @@ function init() {
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); APP.prompt = e; renderInstallRow(); });
   window.addEventListener('appinstalled', () => { APP.prompt = null; renderInstallRow(); });
   $('#btnInstall').addEventListener('click', installApp);
+  // Older cached HTML may not have update controls yet.
+  $('#btnCheckUpdate')?.addEventListener('click', () => refreshApp({ checkOnly: true }));
+  $('#btnRefreshApp')?.addEventListener('click', () => refreshApp());
+  const appUpdates = $('#btnAppUpdates');
+  if (appUpdates) {
+    appUpdates.hidden = !/^https?:$/.test(location.protocol);
+    appUpdates.addEventListener('click', () => openSettings('about'));
+  }
   PHONE_MQ.addEventListener('change', () => { closeAllOverlays(); renderNicklist(); });
 
   // Settings dialog

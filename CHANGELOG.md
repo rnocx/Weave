@@ -4,6 +4,17 @@ Notable changes to Weave, newest first. Website releases use semantic versions
 from VERSION and matching GitHub release tags (for example, v1.0.0).
 Older entries are grouped by date. The Mac app has its own version.
 
+## 1.2.3 — 2026-11-27
+
+### Added
+- Settings → About has Check for updates and Refresh app controls for installed
+  apps and browser tabs. Refresh downloads the app files before reloading and
+  keeps settings and saved drafts. Failed downloads leave the current app open.
+
+### Changed
+- Public builds include the release version in stylesheet and script URLs so
+  a new release loads fresh assets even when older files are cached.
+
 ## 1.2.1 — 2026-11-27
 
 ### Changed

@@ -40,3 +40,13 @@ NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-history-sc
 
 This uses a simulated relay and a touch viewport. Check flick scrolling on an
 iPhone separately; browser automation does not reproduce native momentum.
+
+To check app updates against a local server with long-lived HTTP caching:
+
+```sh
+deploy/build-public.sh
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-app-updates.cjs
+```
+
+This checks version detection, failed downloads, refreshed scripts and styles,
+and settings and draft persistence after a reload.

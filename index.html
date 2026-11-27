@@ -19,6 +19,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Weave">
 <meta name="application-name" content="Weave">
+<meta name="weave-version" content="development">
 <link id="appleIcon" rel="apple-touch-icon" href="data:,">
 <link rel="stylesheet" href="weave.css">
 </head>
@@ -30,6 +31,7 @@
     <div class="brand-lg">
       <svg class="logo" data-logo viewBox="0 0 32 32"></svg>
       <div><h1>Weave</h1><p id="cTagline">Connect to your WeeChat relay</p></div>
+      <button class="icon-btn connect-updates" id="btnAppUpdates" type="button" title="App updates" hidden><svg class="i" data-i="refresh"></svg></button>
     </div>
     <form id="connectForm" novalidate>
       <div class="row2">
@@ -320,7 +322,13 @@
         <div class="set-row"><div class="lbl"><b>Install Weave</b><small id="installHint">Add it to your home screen or desktop. It opens in its own window, without the browser's address bar.</small></div>
           <button class="btn sm primary" id="btnInstall" type="button" hidden>Install</button></div>
       </div>
-      <div class="set-sec"><h3>About</h3><div class="about" id="aboutText"></div></div>
+      <div class="set-sec" id="aboutSec"><h3>About</h3><div class="about" id="aboutText"></div>
+        <div class="set-row col" id="appUpdateRow" hidden>
+          <div class="lbl"><b>App updates</b><small>Reloads Weave from this server. Your settings and saved drafts stay on this device.</small></div>
+          <div class="app-update-actions"><button class="btn sm" id="btnCheckUpdate" type="button">Check for updates</button><button class="btn sm" id="btnRefreshApp" type="button">Refresh app</button></div>
+          <div class="about" id="appUpdateStatus" role="status" aria-live="polite"></div>
+        </div>
+      </div>
     </div>
   </div>
 </dialog>
