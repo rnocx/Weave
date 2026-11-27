@@ -919,10 +919,9 @@ function ensureLoaded(b) {
     b.lazy = false;
     if (b.id === S.active) {
       refreshSearchHits(b);
-      const box = $('#msgs');
-      const pinned = S.pinned, fromBottom = box.scrollHeight - box.scrollTop;
+      const anchor = captureScrollAnchor();
       renderMessages();
-      if (!pinned) { box.scrollTop = box.scrollHeight - fromBottom; S.pinned = false; updateJump(); }
+      restoreScrollAnchor(anchor);
       renderNicklist();
       renderHeader();
     }
@@ -1664,15 +1663,11 @@ function restoreScrollAnchor(a) {
 }
 
 function rerenderKeepingPosition() {
-  const box = $('#msgs');
-  box.classList.add('measuring');
-  const fromBottom = box.scrollHeight - box.scrollTop;
+  const pinned = S.pinned;
+  const anchor = captureScrollAnchor();
   renderMessages();
-  box.classList.add('measuring');
-  box.scrollTop = box.scrollHeight - fromBottom;
-  box.classList.remove('measuring');
-  S.pinned = false;
-  updateJump();
+  if (pinned) scrollToBottom();
+  else restoreScrollAnchor(anchor);
 }
 
 async function loadOlder() {
@@ -1683,7 +1678,11 @@ async function loadOlder() {
   if (b.lazy) { await ensureLoaded(b); return; }
   if (!b.hasMore || !S.connected) return;
   const top = $('#historyTop');
-  if (top) top.innerHTML = '<span class="spinner"></span>';
+  if (top) {
+    // Swapping the button for a spinner must not shrink the scroll content.
+    top.style.minHeight = top.offsetHeight + 'px';
+    top.innerHTML = '<span class="spinner"></span>';
+  }
   try {
     await fetchOlderLines(b);
     if (b.id === S.active) { refreshSearchHits(b); rerenderKeepingPosition(); if (S.search) updateSearchUI(); }

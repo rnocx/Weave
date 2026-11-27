@@ -30,3 +30,13 @@ scripts are changed):
 ```sh
 NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-script-controls.cjs
 ```
+
+To check scroll position during history loading, including messages arriving
+while a request is pending and expanding history already in memory:
+
+```sh
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-history-scroll.cjs
+```
+
+This uses a simulated relay and a touch viewport. Check flick scrolling on an
+iPhone separately; browser automation does not reproduce native momentum.

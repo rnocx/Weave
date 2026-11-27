@@ -9,6 +9,7 @@
   --fs:14px;
   --side-w:264px; --nl-w:228px; --nick-w:128px; --ts-w:50px;
   --pad-x:20px; --row-py:2px; --group-gap:7px;
+  --msg-line-height:1.55; --stacked-group-gap:11px; --stacked-row-gap:1px;
   --radius:12px; --radius-sm:8px;
   --accent:var(--theme-accent);   /* a chosen accent overrides this inline (weave.js) */
   --accent-soft:color-mix(in srgb,var(--accent) 14%,transparent);
@@ -138,11 +139,12 @@
   --a0:#2e343c; --a1:#bd0f2f; --a2:#35a770; --a3:#fb9435; --a4:#1f5872; --a5:#bd2523; --a6:#778397; --a7:#ffffff;
   --a8:#404a55; --a9:#bd0f2f; --a10:#49e998; --a11:#fddf6e; --a12:#2a8bc1; --a13:#ea4727; --a14:#a0b6d3; --a15:#ffffff;
 }
-:root[data-density=compact]{--row-py:0px;--group-gap:2px;--pad-x:14px}
+:root[data-density=compact]{--row-py:0px;--group-gap:1px;--pad-x:14px;
+  --msg-line-height:1.35;--stacked-group-gap:3px;--stacked-row-gap:0px}
 :root[data-font=mono]{--chat-font:var(--font-mono);--nick-w:120px}
 
 html,body{height:100%}
-html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html{background:var(--bg);-webkit-text-size-adjust:100%;text-size-adjust:100%}
 button,a,.buf,.nk,[role=button]{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--text);font:var(--fs)/1.5 var(--font-ui);
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow:hidden;overscroll-behavior:none;
@@ -394,7 +396,7 @@ mark.hl-q{background:color-mix(in srgb,var(--warn) 42%,transparent);color:inheri
 /* ── Messages ───────────────────────────────────────────────────────────── */
 .msgs-wrap{flex:1;position:relative;min-height:0}
 .msgs{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:10px 0 12px;overscroll-behavior:contain;
-  font-family:var(--chat-font);font-size:var(--fs);line-height:1.55}
+  font-family:var(--chat-font);font-size:var(--fs);line-height:var(--msg-line-height)}
 .history-top{display:flex;justify-content:center;padding:8px 0 16px;color:var(--muted);font-size:12px;font-family:var(--font-ui)}
 .history-top .btn{height:28px;font-size:12px;padding:0 12px;border-radius:999px}
 .buf-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:100%;color:var(--muted);font-family:var(--font-ui);text-align:center;padding:24px}
@@ -645,6 +647,10 @@ dialog.sw-dlg{margin-top:12vh}
   .topbar{padding-left:6px;padding-right:8px;gap:6px;min-height:54px}
   .tb-title .chip{display:none}
   .composer-wrap{padding:0 8px 8px;padding-bottom:max(8px,env(safe-area-inset-bottom))}
+  @media (display-mode:standalone){
+    /* Keep a small gesture margin without lifting the whole composer by 34px. */
+    .composer-wrap{padding-bottom:max(8px,calc(env(safe-area-inset-bottom) - 16px))}
+  }
   .my-nick{display:none}
   .search-btn kbd{display:none}
   /* Two rows on phones: [🔍 input ✕] then [count · older · ↑ ↓ · Only]. */
@@ -670,11 +676,11 @@ dialog.sw-dlg{margin-top:12vh}
   .row .ts{display:none}
   .row .pf{grid-area:pf;text-align:left;max-width:60vw}
   .row .tx{grid-area:tx}
-  .row:not(.act):not(.sys):not(.ev):not(.cont){grid-template-areas:"pf ts" "tx tx";row-gap:1px}
+  .row:not(.act):not(.sys):not(.ev):not(.cont){grid-template-areas:"pf ts" "tx tx";row-gap:var(--stacked-row-gap)}
   .row:not(.act):not(.sys):not(.ev):not(.cont) .ts{display:block;grid-area:ts;text-align:left;font-size:.72em}
   .row.cont{grid-template-areas:"tx tx"}
   .row.cont .pf{display:none}
-  .row.first{margin-top:calc(var(--group-gap) + 4px)}
+  .row.first{margin-top:var(--stacked-group-gap)}
   .row.hl{box-shadow:inset 3px 0 var(--warn)}
 
   /* Settings and other dialogs become full-screen sheets. */
@@ -703,6 +709,8 @@ dialog.sw-dlg{margin-top:12vh}
 
 /* Touch devices: finger-sized targets, no hover-only controls, no iOS zoom. */
 @media (hover:none) and (pointer:coarse){
+  /* Estimated off-screen heights can shift wrapped messages during a swipe. */
+  .msgs .row:not(.free){content-visibility:visible}
   .icon-btn{width:40px;height:40px}
   .send-btn,.attach-btn{width:40px;height:40px}
   .composer{padding:4px}

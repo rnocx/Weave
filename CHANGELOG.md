@@ -4,6 +4,21 @@ Notable changes to Weave, newest first. Website releases use semantic versions
 from VERSION and matching GitHub release tags (for example, v1.0.0).
 Older entries are grouped by date. The Mac app has its own version.
 
+## 1.2.1 — 2026-11-27
+
+### Changed
+- Compact density uses tighter line spacing and smaller gaps between message
+  groups, including stacked messages on phones. Text size stays the same.
+
+### Fixed
+- Installed iPhone web apps no longer use the translucent status-bar mode that
+  could blur the header and leave an oversized gap below the composer. The
+  page background follows the theme, and the composer has a smaller bottom inset.
+- Loading older history keeps the visible message in place. Returning to the
+  latest messages while a history request is pending keeps following new messages.
+- Touch devices use actual message heights instead of off-screen estimates,
+  and the history loading indicator keeps the same height as its button.
+
 ## 1.2.0 — 2026-11-26
 
 ### Added
