@@ -965,11 +965,14 @@ function applyHotlist(list) {
 }
 
 function isVisibleLine(b, l) {
-  if (l.displayed === false) return false;
   const tags = l.tags || [];
-  if (settings.hideJoins && tags.some(t => t === 'irc_join' || t === 'irc_part' || t === 'irc_quit')) return false;
   const smart = b.filterOverride ?? settings.smartFilter;
-  if (smart && tags.includes('irc_smart_filter')) return false;
+  const smartTagged = tags.includes('irc_smart_filter');
+  // Reveal smart-filtered lines locally even when WeeChat hides them. Keep
+  // respecting the server's display flag for lines without that tag.
+  if (l.displayed === false && (smart || !smartTagged)) return false;
+  if (settings.hideJoins && tags.some(t => t === 'irc_join' || t === 'irc_part' || t === 'irc_quit')) return false;
+  if (smart && smartTagged) return false;
   return true;
 }
 
@@ -1413,7 +1416,9 @@ function renderHeader() {
   const on = b.filterOverride ?? settings.smartFilter;
   f.innerHTML = ico(on ? 'eyeOff' : 'eye');
   f.classList.toggle('on', !!on);
-  f.title = on ? 'Join/part noise hidden (smart filter on) — click to show' : 'Showing all joins/parts — click to filter';
+  f.title = on ? 'Smart-filtered IRC events hidden — click to show' :
+    settings.hideJoins ? 'Smart filter off; Hide all join/part/quit is still enabled in Settings' :
+    'Smart filter off — click to hide smart-filtered IRC events';
   $('#btnSearch').hidden = b.type === 'free';
   $('#fsetBar').hidden = b.lv.plugin !== 'fset';
   renderScriptBar();
@@ -3493,6 +3498,10 @@ async function setSetting(k, v) {
     }
   }
   settings[k] = v;
+  if ((k === 'smartFilter' || k === 'hideJoins') && activeBuf() && S.search) {
+    refreshSearchHits(activeBuf());
+    updateSearchUI();
+  }
   saveSettings();
   if (k === 'saveHistory') saveHistory();
   if (k === 'uploadUrl' || k === 'uploadBackend') { UP.info = null; testUploadServer(); }
@@ -3957,6 +3966,7 @@ function init() {
   $('#btnFilter').addEventListener('click', () => {
     const b = activeBuf(); if (!b) return;
     b.filterOverride = !(b.filterOverride ?? settings.smartFilter);
+    if (S.search) { refreshSearchHits(b); updateSearchUI(); }
     renderHeader();
     scheduleRerender();
   });

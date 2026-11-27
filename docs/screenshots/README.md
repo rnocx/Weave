@@ -50,3 +50,10 @@ NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-app-update
 
 This checks version detection, failed downloads, refreshed scripts and styles,
 and settings and draft persistence after a reload.
+
+To check smart filtering of history and live IRC events, buffer overrides,
+server-hidden lines, and search results:
+
+```sh
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-message-filters.cjs
+```

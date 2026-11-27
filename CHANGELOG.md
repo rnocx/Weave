@@ -4,6 +4,13 @@ Notable changes to Weave, newest first. Website releases use semantic versions
 from VERSION and matching GitHub release tags (for example, v1.0.0).
 Older entries are grouped by date. The Mac app has its own version.
 
+## Unreleased
+
+### Fixed
+- Turning Smart filter off reveals lines tagged `irc_smart_filter`, even when
+  WeeChat marks them as hidden. Other server-filtered lines stay hidden, and
+  Hide all join/part/quit still applies. Search results follow filter changes.
+
 ## 1.2.3 — 2026-11-27
 
 ### Added

@@ -61,6 +61,11 @@ external requests.
 - "Mark all as read" (<kbd>Shift</kbd>+<kbd>Esc</kbd>), synced to WeeChat's hotlist
 - Clean message view: day separators, an unread marker, grouping of consecutive
   messages, highlight styling, compact join/part rows, `/me` actions
+- The eye button toggles smart filtering for the current buffer. Turning it off
+  reveals events tagged `irc_smart_filter`, including mode changes, even when
+  WeeChat marks those lines as hidden. Settings → Behaviour sets the default;
+  Hide all join/part/quit applies separately. Lines without the smart-filter tag
+  still follow WeeChat's display flag.
 - WeeChat colours rendered faithfully and contrast-corrected for the light and
   dark themes
 - **Colour themes**: pick one for dark mode (Weave, Solarized, Gruvbox,
