@@ -1,4 +1,4 @@
-# Public Weave: static files only. No backend, no relay proxying, no logs.
+# Public Weave: static files only by default, with an optional relay proxy below.
 # Build the files first: deploy/build-public.sh, then copy deploy/dist/* to
 # /var/www/weave. Replace weave.example.com with your domain; Caddy gets the
 # Let's Encrypt certificate and redirects HTTP to HTTPS by itself.
@@ -13,6 +13,18 @@
 
 weave.example.com {
 	root * /var/www/weave
+
+	# Optional: uncomment to serve your own relay on this host. Keep its port
+	# bound to localhost. WebSocket connections stay open; short HTTP requests
+	# close promptly so handshakes do not hit WeeChat's authentication timeout.
+	# @relay path /api /api/*
+	# handle @relay {
+	# 	reverse_proxy 127.0.0.1:9000 {
+	# 		transport http {
+	# 			keepalive off
+	# 		}
+	# 	}
+	# }
 
 	# Only the app's own files; everything else is a bare 404.
 	@app path / /index.html /weave.css /weave.js /weave.zip

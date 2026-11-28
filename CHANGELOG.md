@@ -4,12 +4,39 @@ Notable changes to Weave, newest first. Website releases use semantic versions
 from VERSION and matching GitHub release tags (for example, v1.0.0).
 Older entries are grouped by date. The Mac app has its own version.
 
-## Unreleased
+## 1.2.4 — 2026-11-28
+
+### Added
+- Support newer relay history counts and visible-message pagination while
+  retaining filtered lines between messages. Keep raw-line pagination for stable
+  relays without those fields.
+- Reorder whole networks in the sidebar by dragging their headings or using
+  Move network up/down from their menus. Touch devices have a visible network
+  menu button. Save network and channel order on the current device, with
+  separate reset actions; WeeChat's buffer order stays unchanged.
 
 ### Fixed
-- Turning Smart filter off reveals lines tagged `irc_smart_filter`, even when
-  WeeChat marks them as hidden. Other server-filtered lines stay hidden, and
-  Hide all join/part/quit still applies. Search results follow filter changes.
+- Refresh cached history on development relays' `buffer_lines_filtered` events,
+  including rule changes that leave the per-buffer filter switch enabled.
+  Defer inactive buffers until opened and repeat refreshes if filters change
+  while a request is pending.
+- Handle multiple nick prefixes in member grouping and moderation menus.
+- Place read markers when nothing has been read or the last-read line is absent
+  from loaded history, using the newer relay flag when available.
+- Give local-network permission prompts time during initial relay connections,
+  ask for a Connect tap when permission is needed before automatic login, and
+  explain how to allow blocked access in browser site settings.
+- Relay proxy examples close short HTTP connections after each response while
+  preserving WebSockets, avoiding authentication-timeout messages from idle
+  handshake connections. Deployment templates include opt-in relay blocks.
+- The eye button toggles WeeChat's filters in the current buffer with
+  `/filter toggle @` and refreshes loaded history on 4.10.5. Settings separately
+  reads and changes the global `irc.look.smart_filter` option, following changes
+  from other clients. Remove local smart-filter preferences and overrides;
+  message visibility follows WeeChat's display flags.
+- The eye icon reflects WeeChat's actual per-buffer filter switch, including
+  on 4.10.5 and in empty buffers. Refresh the active buffer's state and history
+  when filtering changes in another client.
 
 ## 1.2.3 — 2026-11-27
 

@@ -51,9 +51,36 @@ NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-app-update
 This checks version detection, failed downloads, refreshed scripts and styles,
 and settings and draft persistence after a reload.
 
-To check smart filtering of history and live IRC events, buffer overrides,
-server-hidden lines, and search results:
+To check the server's smart-filter option, changes from other clients, command
+failures, stale responses, and message display flags:
 
 ```sh
 NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-message-filters.cjs
 ```
+
+To check network and channel ordering, desktop dragging, touch menus,
+persistence, resets, and preservation of WeeChat's buffer numbers:
+
+```sh
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-sidebar-order.cjs
+```
+
+To check local-network permission handling and the stable/development relay
+response formats (history counts, filtering events, read markers, and nick prefixes):
+
+```sh
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-network-permissions.cjs
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-relay-compatibility.cjs
+```
+
+For live relay checks, the test starts and cleans up its own WeeChat instance,
+using a temporary profile and a host port bound to loopback. Run it against the
+latest release image and an installed headless binary built from upstream `main`:
+
+```sh
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-relay-live.cjs --image weechat/weechat:4.10.5
+NODE_PATH=/tmp/weave-screenshots-runtime/node_modules node tools/test-relay-live.cjs --binary /absolute/path/to/weechat-headless
+```
+
+This checks hashed login, history paging, counts and filter events when present,
+stable fallbacks, and global option changes from a second relay client.

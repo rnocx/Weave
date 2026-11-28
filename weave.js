@@ -59,6 +59,7 @@ const ICONS = {
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   chev: '<path d="m9 6 6 6-6 6"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   at: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
@@ -152,13 +153,15 @@ const THEMES = {
 const ACCENTS = { indigo: '#6470f3', violet: '#8b5cf6', teal: '#119e9e', green: '#2f9e62', amber: '#d98a10', rose: '#e0527a', slate: '#64748b' };
 const DEFAULTS = {
   theme: 'system', darkTheme: 'weave', lightTheme: 'weave', accent: 'auto', font: 'sans', fontSize: '14', density: 'comfortable', clock: '24',
-  groupMessages: true, smartFilter: true, hideJoins: false, media: 'click', nicklist: true, privateAvatars: true,
+  groupMessages: true, hideJoins: false, media: 'click', nicklist: true, privateAvatars: true,
   notify: false, typing: true, syncRead: true, syncCurrent: false, saveHistory: true,
   privatebinUrl: 'https://0bin.ch/',
   uploadBackend: PUBLIC ? 'off' : CONFIG.uploadBackend, litterboxTime: '24h', tmpfilesTime: '1h',
   uploadUrl: PUBLIC ? '' : CONFIG.uploadUrl, uploadTime: CONFIG.uploadTime, uploadPassword: '', uploadOneTime: false, uploadAction: 'insert',
 };
 const settings = Object.assign({}, DEFAULTS, store.get('settings', {}));
+// Smart filtering belongs to WeeChat; discard the former local preference.
+delete settings.smartFilter;
 // Saved before themes existed: indigo was the default then, and is Weave's own
 // theme accent now, so follow the theme instead.
 if (!('darkTheme' in store.get('settings', {})) && settings.accent === 'indigo') settings.accent = 'auto';
@@ -449,6 +452,7 @@ const S = {
   buffers: new Map(),         // id(string) → buffer
   active: null,               // active buffer id
   version: null,
+  smartFilter: null, smartFilterBusy: false, smartFilterRead: 0, smartFilterLegacy: false, smartFilterTimer: null,
   reconnectTimer: null, reconnectDelay: 1000, reconnectAt: 0, countdown: null,
   pingTimer: null, pinging: false, connectTimer: null,
   connecting: false, failures: 0, forcePlain: false,
@@ -497,21 +501,21 @@ function relayUrls(cfg) {
 // Build the credential string. With "auto", ask the relay which hash it wants
 // (POST /api/handshake needs no auth) and hash locally so the password itself
 // never crosses the wire. `forcePlain` skips hashing (clock-drift fallback).
-async function buildCredentials(cfg, httpBase, forcePlain = false) {
+async function buildCredentials(cfg, httpBase, forcePlain = false, timeout = 5000) {
   const plain = 'plain:' + cfg.password;
   if (forcePlain || cfg.auth === 'plain' || !globalThis.crypto?.subtle) return plain;
   let hs;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeout);
   try {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 5000);
     const res = await fetch(httpBase + '/handshake', {
       method: 'POST', signal: ctl.signal,
       body: JSON.stringify({ password_hash_algo: ['pbkdf2+sha512', 'pbkdf2+sha256', 'sha512', 'sha256', 'plain'] }),
     });
-    clearTimeout(t);
     if (!res.ok) return plain;
     hs = await res.json();
   } catch { return plain; }   // handshake unreachable (proxy, CORS, cert) — fall back
+  finally { clearTimeout(t); }
   const algo = hs.password_hash_algo;
   if (!algo) throw new Error('The relay does not accept any password hash algorithm this client supports.');
   if (algo === 'plain') return plain;
@@ -570,6 +574,7 @@ function unreachableHtml(cfg, urls, probe) {
   if (probe.ok) return 'The relay accepted the password but refused the WebSocket connection. If a reverse proxy sits in front of it, make sure it forwards the <code>Upgrade</code> and <code>Connection</code> headers. Also check <code>relay.network.websocket_allowed_origins</code> and <code>relay.network.max_clients</code>.';
   let msg = `Could not reach the relay at <code>${esc(urls.ws)}</code>. Check the host and port, and that an <b>api</b> relay is listening (<code>/relay listrelay</code>).`;
   msg += hostHint(cfg.host);
+  msg += ' If the relay is on your local network, allow local network access for this Weave site in your browser’s site settings, then tap Connect. Permission granted to another app or website does not apply to Weave.';
   if (cfg.tls) msg += ` If it uses a self-signed certificate, <a href="${esc(urls.http)}/version" target="_blank" rel="noopener">open it in a new tab</a>, accept the warning, then try again.`;
   return msg;
 }
@@ -592,7 +597,34 @@ function hostHint(host) {
   return '';
 }
 
-async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
+// DNS may resolve a public-looking name to a LAN address. Only classify literal
+// addresses here; leave DNS classification and the permission prompt to the browser.
+function relayAddressSpace(host) {
+  const h = String(host).toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127\./.test(h)) return 'loopback';
+  if (h.endsWith('.local') || /^(f[cd][\da-f]{2}:|fe[89ab][\da-f]:)/.test(h)) return 'local';
+  const ip = h.split('.').map(Number);
+  if (ip.length === 4 && ip.every(n => Number.isInteger(n) && n >= 0 && n <= 255)) {
+    return ip[0] === 10 || (ip[0] === 172 && ip[1] >= 16 && ip[1] <= 31) ||
+      (ip[0] === 192 && ip[1] === 168) || (ip[0] === 169 && ip[1] === 254) ? 'local' : 'public';
+  }
+  return 'unknown';
+}
+
+async function relayNetworkPermission(cfg) {
+  const space = relayAddressSpace(cfg.host);
+  if (space === 'public' || new URL(relayUrls(cfg).http).origin === location.origin) return { space, states: [] };
+  const names = space === 'unknown' ? ['local-network', 'loopback-network'] : [space + '-network'];
+  const states = await Promise.all(names.map(async name => {
+    try { return (await navigator.permissions.query({ name })).state; }
+    catch { return 'unsupported'; } // Never query the legacy name: older Chrome can crash.
+  }));
+  return { space, states };
+}
+
+const NETWORK_PERMISSION_HELP = 'Local network access is blocked. Allow local network access for this Weave site in your browser’s site settings, then tap Connect. In Chrome on Android: Settings → Site settings → Local network access. The Android permission for Chrome itself is separate.';
+
+async function connect(cfg, { forcePlain = S.forcePlain, userInitiated = false } = {}) {
   clearTimeout(S.reconnectTimer);
   clearInterval(S.countdown);
   if (cfg.totpEnabled && (!cfg.tls || !/^[0-9]{6}$/.test(cfg.totp || ''))) {
@@ -603,10 +635,31 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
   S.connecting = true;
   setConnStatus('busy', S.everConnected ? 'Reconnecting…' : 'Connecting…');
   const urls = relayUrls(cfg);
+  const permission = await relayNetworkPermission(cfg);
+  if (S.userClosed) { S.connecting = false; return; }
+  const knownLocal = ['local', 'loopback'].includes(permission.space);
+  if (knownLocal && permission.states.includes('denied')) {
+    S.connecting = false;
+    return connectFailed(NETWORK_PERMISSION_HELP);
+  }
+  const mayPrompt = permission.states.some(state => state === 'prompt' || state === 'unsupported');
+  // Unknown DNS names may be public: do not disable their automatic login just
+  // because an unrelated LAN permission has never been granted to this site.
+  if (!userInitiated && !S.everConnected && knownLocal && permission.states.includes('prompt')) {
+    S.connecting = false;
+    return connectFailed('Tap Connect to continue. If your relay is on the local network, allow access when the browser asks so Weave can reach it.');
+  }
+  const waitingForPermission = !S.everConnected && mayPrompt;
+  $('#cNetworkHint').hidden = !waitingForPermission;
   let creds;
-  try { creds = await buildCredentials(cfg, urls.http, forcePlain); }
+  try { creds = await buildCredentials(cfg, urls.http, forcePlain, waitingForPermission ? 60000 : 5000); }
   catch (e) { S.connecting = false; return connectFailed(esc(e.message)); }
   if (S.userClosed) { S.connecting = false; return; }   // disconnected while hashing
+  const afterHandshake = await relayNetworkPermission(cfg);
+  if (knownLocal && afterHandshake.states.includes('denied')) {
+    S.connecting = false;
+    return connectFailed(NETWORK_PERMISSION_HELP);
+  }
 
   let ws;
   try {
@@ -617,7 +670,7 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
   S.ws = ws;
   let opened = false;
   clearTimeout(S.connectTimer);
-  S.connectTimer = setTimeout(() => { if (!opened && S.ws === ws) dropConnection(); }, 12000);
+  S.connectTimer = setTimeout(() => { if (!opened && S.ws === ws) dropConnection(); }, waitingForPermission ? 60000 : 12000);
 
   ws.onopen = () => {
     if (S.ws !== ws) return;
@@ -625,6 +678,7 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
     clearTimeout(S.connectTimer);
     S.connecting = false;
     S.connected = true;
+    $('#cNetworkHint').hidden = true;
     S.reconnectDelay = 1000;
     S.failures = 0;
     if (forcePlain && !S.forcePlain && cfg.auth !== 'plain') {
@@ -646,6 +700,7 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
     S.connecting = false;
     const wasConnected = S.connected;
     S.connected = false;
+    resetSmartFilter();
     stopHeartbeat();
     rejectPending();
     if (S.userClosed) return;
@@ -659,6 +714,8 @@ async function connect(cfg, { forcePlain = S.forcePlain } = {}) {
 }
 
 async function handleConnectFailure(cfg, urls, { hashed, forcePlain }) {
+  const permission = await relayNetworkPermission(cfg);
+  if (S.userClosed || S.ws || S.connecting) return;
   if (cfg.totpEnabled) {
     cfg.totp = '';
     $('#cTotp').value = '';
@@ -668,6 +725,7 @@ async function handleConnectFailure(cfg, urls, { hashed, forcePlain }) {
   }
   const probe = await probeRelay(cfg, urls, forcePlain);
   if (S.userClosed || S.ws || S.connecting) return;   // superseded while probing
+  if (!probe.reachable && permission.states.includes('denied')) return connectFailed('If this relay is on your local network, access may be blocked. ' + NETWORK_PERMISSION_HELP);
   // Clock drift: over TLS it's safe to retry once with the plain password.
   if (probe.status === 401 && /timestamp/i.test(probe.error) && hashed && cfg.tls && cfg.auth === 'auto' && !forcePlain) {
     return connect(cfg, { forcePlain: true });
@@ -680,6 +738,7 @@ async function handleConnectFailure(cfg, urls, { hashed, forcePlain }) {
 }
 
 function connectFailed(html) {
+  $('#cNetworkHint').hidden = true;
   setConnStatus('bad', 'Offline');
   showScreen('connect');
   setConnecting(false);
@@ -768,6 +827,7 @@ function teardown() {
   stopHeartbeat();
   if (S.ws) { const ws = S.ws; S.ws = null; try { ws.close(1000); } catch {} }
   S.connected = false;
+  resetSmartFilter();
   rejectPending();
   S.buffers.clear();
   S.active = null;
@@ -835,6 +895,8 @@ function onConnected() {
   S.quitting = false;
   S.everConnected = true;
   S.noTyping = false;
+  resetSmartFilter();
+  S.smartFilterTimer = setInterval(refreshFilterState, 15000);
   S.cmdNames = null;   // the relay's command list (palette), fetched again on first use
   const cfg = S.cfg;
   const saved = { host: cfg.host, port: cfg.port, tls: cfg.tls, path: cfg.path, auth: cfg.auth, totpEnabled: !!cfg.totpEnabled, remember: cfg.remember, auto: cfg.totpEnabled ? false : cfg.auto };
@@ -856,7 +918,9 @@ function onConnected() {
   // startup light for accounts with many or very large channels.
   request('GET', `/api/buffers?lines=-${PREVIEW_LINES}&nicks=false&colors=ansi`).then(r => onBuffersLoaded(r.body || [])).catch(e => toast('Failed to load buffers: ' + e.message, { error: true }));
   request('GET', '/api/hotlist').then(r => applyHotlist(r.body || [])).catch(() => {});
-  request('POST', '/api/sync', { sync: true, nicks: true, input: false, typing: true, colors: 'ansi' }).catch(e => console.warn('[weave] sync failed:', e.message));
+  request('POST', '/api/sync', { sync: true, nicks: true, input: false, typing: true, colors: 'ansi',
+    options: ['irc.look.smart_filter'] }).catch(e => console.warn('[weave] sync failed:', e.message))
+    .then(() => readSmartFilter()).catch(() => {});
 
   startHeartbeat();
 }
@@ -866,7 +930,8 @@ function makeBuffer(raw, prev) {
   const id = String(raw.id);
   const b = {
     id, lines: [], nicks: new Map(), nicksLoaded: false, unread: 0, mentions: 0,
-    lastReadId: null, draft: '', filterOverride: null,
+    lastReadId: null, firstLineUnread: false, linesCount: null, linesFiltered: null,
+    draft: '', filterBusy: false, filterEnabled: null, filterReadPromise: null, filterRefreshNeeded: false, filterRefreshPromise: null,
     fetched: 0, hasMore: false, loadingMore: false, renderCount: RENDER_WINDOW, renderStart: 0,
     lazy: true, loading: null,
   };
@@ -879,10 +944,14 @@ function makeBuffer(raw, prev) {
   if (b.type === 'free') b.lazy = false;
   if (raw.nicklist_root) { collectNicks(raw.nicklist_root, b.nicks); b.nicksLoaded = true; }
   if (!b.nicklist) b.nicksLoaded = true;
-  const lr = raw.last_read_line_id;
-  b.lastReadId = lr != null && lr >= 0 ? Number(lr) : null;
+  updateReadMarker(b, raw);
   b.draft = drafts[b.name] || '';
-  if (prev) { b.draft = prev.draft; b.filterOverride = prev.filterOverride; if (prev.lastReadId != null) b.lastReadId = prev.lastReadId; }
+  if (prev) {
+    b.draft = prev.draft;
+    if (raw.last_read_line_id === undefined && raw.first_line_not_read === undefined) {
+      b.lastReadId = prev.lastReadId; b.firstLineUnread = prev.firstLineUnread;
+    }
+  }
   return b;
 }
 
@@ -891,6 +960,25 @@ function updateBufferFields(b, raw) {
     if (raw[k] !== undefined) b[k] = raw[k];
   }
   b.lv = b.local_variables || {};
+  if (Number.isInteger(raw.lines_count) && raw.lines_count >= 0) b.linesCount = raw.lines_count;
+  if (Number.isInteger(raw.lines_filtered) && raw.lines_filtered >= 0) b.linesFiltered = raw.lines_filtered;
+}
+
+function updateReadMarker(b, raw) {
+  if (raw.last_read_line_id !== undefined) b.lastReadId = raw.last_read_line_id >= 0 ? Number(raw.last_read_line_id) : null;
+  if (raw.first_line_not_read !== undefined) b.firstLineUnread = raw.first_line_not_read === true && b.lastReadId == null;
+}
+
+// The count fields identify relays with filtered history requests. Early 0.7.0
+// development builds lack them, so the API version alone is not sufficient.
+function filteredHistory(b) { return b.linesCount != null && b.linesFiltered != null; }
+function historyCount(b, lines) { return filteredHistory(b) ? lines.filter(l => l.displayed !== false).length : lines.length; }
+function historyFilterParam(b) { return filteredHistory(b) && b.type !== 'free' ? '&filtered=between' : ''; }
+function hasOlderHistory(b, got, requested, visibleCount = filteredHistory(b)) {
+  const count = lines => visibleCount ? lines.filter(l => l.displayed !== false).length : lines.length;
+  if (count(got) < requested) return false; // Also handles server history pruning.
+  if (b.linesCount == null) return true;
+  return count(b.lines) < b.linesCount - (visibleCount ? b.linesFiltered : 0);
 }
 
 function collectNicks(group, map) {
@@ -904,19 +992,22 @@ function collectNicks(group, map) {
 function ensureLoaded(b) {
   if (!b.lazy) return Promise.resolve();
   if (b.loading) return b.loading;
-  b.loading = request('GET', `/api/buffers/${b.id}?lines=-${INIT_LINES}&nicks=true&colors=ansi`).then(r => {
+  const visibleCount = filteredHistory(b);
+  b.loading = request('GET', `/api/buffers/${b.id}?lines=-${INIT_LINES}&nicks=true&colors=ansi${historyFilterParam(b)}`).then(r => {
     const raw = r.body;
     if (!raw || S.buffers.get(b.id) !== b) return;
     updateBufferFields(b, raw);
+    updateReadMarker(b, raw);
     const got = Array.isArray(raw.lines) ? raw.lines : [];
     const newest = got.length ? got[got.length - 1].id : -1;
     b.lines = got.concat(b.lines.filter(l => l.id > newest));
     b.fetched = INIT_LINES;
-    b.hasMore = got.length >= INIT_LINES;
+    b.hasMore = hasOlderHistory(b, got, INIT_LINES, visibleCount);
     b.nicks = new Map();
     if (raw.nicklist_root) collectNicks(raw.nicklist_root, b.nicks);
     b.nicksLoaded = true;
     b.lazy = false;
+    if (b.filterRefreshNeeded) refreshBufferFilterHistory(b).catch(() => {});
     if (b.id === S.active) {
       refreshSearchHits(b);
       const anchor = captureScrollAnchor();
@@ -965,15 +1056,201 @@ function applyHotlist(list) {
 }
 
 function isVisibleLine(b, l) {
+  if (l.displayed === false) return false;
   const tags = l.tags || [];
-  const smart = b.filterOverride ?? settings.smartFilter;
-  const smartTagged = tags.includes('irc_smart_filter');
-  // Reveal smart-filtered lines locally even when WeeChat hides them. Keep
-  // respecting the server's display flag for lines without that tag.
-  if (l.displayed === false && (smart || !smartTagged)) return false;
   if (settings.hideJoins && tags.some(t => t === 'irc_join' || t === 'irc_part' || t === 'irc_quit')) return false;
-  if (smart && smartTagged) return false;
   return true;
+}
+
+// Show the relay's option value, never a browser preference or optimistic toggle.
+function renderSmartFilterControls() {
+  const on = S.smartFilter === true;
+  const disabled = !S.connected || S.smartFilterBusy || S.smartFilter == null;
+  const title = !S.connected ? 'Connect to WeeChat to change irc.look.smart_filter' :
+    S.smartFilterBusy ? 'Updating WeeChat smart filter…' :
+    S.smartFilter == null ? 'WeeChat smart filter is unavailable' :
+    `WeeChat smart filter ${on ? 'on' : 'off'} — click to ${on ? 'disable' : 'enable'} for all buffers`;
+  const input = $('#smartFilterSetting') || $('[data-setting=smartFilter]');
+  if (input) {
+    input.checked = on;
+    input.indeterminate = S.smartFilter == null;
+    input.disabled = disabled;
+    input.title = title;
+  }
+  renderBufferFilterControl();
+}
+
+function renderBufferFilterControl() {
+  const button = $('#btnFilter'), b = activeBuf();
+  const on = b?.filterEnabled === true;
+  button.innerHTML = ico(on ? 'eyeOff' : 'eye');
+  button.classList.toggle('on', on);
+  if (b?.filterEnabled == null) button.removeAttribute('aria-pressed');
+  else button.setAttribute('aria-pressed', String(on));
+  button.disabled = !S.connected || !b || !!b.filterBusy;
+  button.title = b?.filterBusy ? 'Updating WeeChat buffer filters…' :
+    b?.filterEnabled == null ? 'Toggle all WeeChat filters in this buffer (state unavailable)' :
+    on ? 'WeeChat filters on in this buffer — click to show filtered messages' :
+    'WeeChat filters off in this buffer — click to enable filters';
+}
+
+// 4.10.5 omits buffer.filter from its JSON. Snapshot the real value into a
+// private local variable without printing query results into the core buffer.
+function readBufferFilterState(b) {
+  if (!S.connected || !b || b.type === 'free' || b.lv.plugin !== 'irc') return Promise.resolve(null);
+  if (b.filterReadPromise) return b.filterReadPromise;
+  const ws = S.ws, token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  b.filterReadPromise = (async () => {
+    try {
+      await request('POST', '/api/input', { buffer_name: b.name,
+        command: '/eval /buffer set localvar_set_weave_filter_state ' + token + ':${buffer.filter}' });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      if (ws !== S.ws || !S.connected || S.buffers.get(b.id) !== b) return null;
+      const response = await request('GET', `/api/buffers/${b.id}?lines=0&nicks=false`);
+      if (ws !== S.ws || !S.connected || S.buffers.get(b.id) !== b) return null;
+      const value = response.body?.local_variables?.weave_filter_state;
+      const enabled = value === token + ':1' ? true : value === token + ':0' ? false : null;
+      if (enabled != null && b.filterEnabled != null && enabled !== b.filterEnabled) b.filterRefreshNeeded = true;
+      b.filterEnabled = enabled;
+      if (b.filterRefreshNeeded && !b.filterBusy) await refreshBufferFilterHistory(b).catch(() => {});
+      return b.filterEnabled;
+    } catch {
+      if (ws === S.ws && S.buffers.get(b.id) === b) b.filterEnabled = null;
+      return null;
+    } finally {
+      b.filterReadPromise = null;
+      renderBufferFilterControl();
+    }
+  })();
+  return b.filterReadPromise;
+}
+
+function refreshBufferFilterHistory(b) {
+  if (b.filterRefreshPromise) return b.filterRefreshPromise;
+  const ws = S.ws;
+  b.filterRefreshNeeded = true;
+  b.filterRefreshPromise = (async () => {
+    do {
+      b.filterRefreshNeeded = false;
+      const want = Math.max(INIT_LINES, b.lines.length);
+      // Include every raw line in the cached range, even if most are hidden.
+      const response = await request('GET', `/api/buffers/${b.id}/lines?lines=-${want}&colors=ansi`);
+      if (ws !== S.ws || !S.connected || S.buffers.get(b.id) !== b) return;
+      if (!Array.isArray(response.body)) throw new Error('Invalid history response');
+      const fresh = new Map(response.body.map(line => [line.id, line]));
+      // Keep messages received or fetched while the refresh was pending.
+      b.lines = b.lines.map(line => fresh.get(line.id) || line);
+      if (filteredHistory(b)) b.hasMore = historyCount(b, b.lines) < b.linesCount - b.linesFiltered;
+      if (b.id === S.active) {
+        refreshSearchHits(b);
+        rerenderKeepingPosition();
+        if (S.search) updateSearchUI();
+      }
+    } while (b.filterRefreshNeeded);
+  })().catch(error => { b.filterRefreshNeeded = true; throw error; })
+    .finally(() => { b.filterRefreshPromise = null; });
+  return b.filterRefreshPromise;
+}
+
+function refreshFilterState() {
+  if (!S.connected || document.hidden) return;
+  if (S.smartFilterLegacy && !S.smartFilterBusy) readSmartFilter().catch(() => {});
+  const b = activeBuf();
+  if (b?.filterRefreshNeeded && !b.filterBusy) refreshBufferFilterHistory(b).catch(() => {});
+  if (b && !b.filterBusy) readBufferFilterState(b);
+}
+
+async function toggleBufferFilters() {
+  const b = activeBuf(), ws = S.ws;
+  if (!b || !S.connected || b.filterBusy) return;
+  b.filterBusy = true;
+  renderBufferFilterControl();
+  try {
+    if (b.filterReadPromise) await b.filterReadPromise;
+    if (ws !== S.ws || !S.connected || S.buffers.get(b.id) !== b) return;
+    await request('POST', '/api/input', { buffer_name: b.name, command: '/filter toggle @' });
+    // /api/input can reply before the deferred command runs. Filtering does
+    // not emit line-update events on 4.10.5, so reload the display flags.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    if (ws !== S.ws || !S.connected || S.buffers.get(b.id) !== b) return;
+    await Promise.all([refreshBufferFilterHistory(b), readBufferFilterState(b)]);
+  } catch (error) {
+    if (ws === S.ws && S.connected) toast('Could not toggle WeeChat buffer filters: ' + error.message, { error: true });
+  } finally {
+    b.filterBusy = false;
+    renderBufferFilterControl();
+  }
+}
+
+function resetSmartFilter() {
+  clearInterval(S.smartFilterTimer);
+  S.smartFilterTimer = null;
+  S.smartFilterLegacy = false;
+  S.smartFilterRead++;
+  S.smartFilter = null;
+  S.smartFilterBusy = false;
+  renderSmartFilterControls();
+}
+
+async function readSmartFilter() {
+  if (!S.connected) return null;
+  const id = ++S.smartFilterRead, ws = S.ws;
+  try {
+    let value;
+    if (!S.smartFilterLegacy) {
+      try {
+        const response = await request('GET', '/api/options/irc.look.smart_filter');
+        value = response.body?.value;
+      } catch (error) {
+        if (ws !== S.ws || !S.connected || id !== S.smartFilterRead) return S.smartFilter;
+        if (error.msg?.code !== 404) throw error;
+        S.smartFilterLegacy = true;
+      }
+    }
+    if (S.smartFilterLegacy) {
+      const b = activeBuf() || S.buffers.values().next().value;
+      if (!b) return null;
+      // WeeChat puts a boolean option's current value first in /set completion.
+      // Unlike executing /set with no value, this produces no core-buffer output.
+      const command = '/set irc.look.smart_filter ';
+      const response = await request('POST', '/api/completion', { buffer_name: b.name, command, position: command.length });
+      const current = response.body?.list?.[0];
+      value = current === 'on' ? true : current === 'off' ? false : null;
+    }
+    if (ws !== S.ws || !S.connected || id !== S.smartFilterRead) return S.smartFilter;
+    if (typeof value !== 'boolean') throw new Error('Invalid smart-filter option value');
+    S.smartFilter = value;
+    renderSmartFilterControls();
+    return S.smartFilter;
+  } catch (error) {
+    if (ws === S.ws && id === S.smartFilterRead) { S.smartFilter = null; renderSmartFilterControls(); }
+    throw error;
+  }
+}
+
+async function setSmartFilter(value) {
+  if (!S.connected || S.smartFilterBusy || S.smartFilter == null) return;
+  const b = activeBuf(), ws = S.ws;
+  if (!b) return;
+  S.smartFilterBusy = true;
+  renderSmartFilterControls();
+  try {
+    await request('POST', '/api/input', { buffer_name: b.name, command: '/set irc.look.smart_filter ' + (value ? 'on' : 'off') });
+    if (ws !== S.ws || !S.connected) return;
+    let actual;
+    // The relay may acknowledge /api/input before its delayed command runs.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      actual = await readSmartFilter();
+      if (actual === value || ws !== S.ws || !S.connected) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (ws !== S.ws || !S.connected) return;
+    if (actual !== value) throw new Error('WeeChat did not change irc.look.smart_filter; check relay command permissions');
+  } catch (error) {
+    if (ws === S.ws && S.connected) toast('Could not change WeeChat smart filter: ' + error.message, { error: true });
+  } finally {
+    if (ws === S.ws) { S.smartFilterBusy = false; renderSmartFilterControls(); }
+  }
 }
 
 function handleEvent(msg) {
@@ -983,6 +1260,13 @@ function handleEvent(msg) {
   const bid = msg.buffer_id != null ? String(msg.buffer_id) : null;
   const body = msg.body;
   switch (msg.event_name) {
+    case 'option_changed': case 'option_removed': {
+      if (body?.name !== 'irc.look.smart_filter') break;
+      S.smartFilterRead++;
+      S.smartFilter = msg.event_name === 'option_changed' && typeof body.value === 'boolean' ? body.value : null;
+      renderSmartFilterControls();
+      break;
+    }
     case 'buffer_opened': {
       if (!body) return;
       const b = makeBuffer(body);
@@ -1023,8 +1307,22 @@ function handleEvent(msg) {
     case 'buffer_cleared': {
       const b = S.buffers.get(bid);
       if (!b) return;
-      b.lines = []; b.hasMore = false; b.scriptSelY = null;
+      updateBufferFields(b, body || {});
+      b.lines = []; b.hasMore = false; b.fetched = 0; b.scriptSelY = null;
+      b.lastReadId = null; b.firstLineUnread = false;
       if (b.id === S.active) renderMessages();
+      break;
+    }
+    case 'buffer_lines_filtered': {
+      const b = S.buffers.get(bid);
+      if (!b || b.type === 'free') break;
+      updateBufferFields(b, body || {});
+      b.filterRefreshNeeded = true;
+      // Inactive buffers refresh on activation; coalesce events during a fetch.
+      if (b.id === S.active && !b.lazy) {
+        refreshBufferFilterHistory(b).catch(() => {});
+        readBufferFilterState(b);
+      }
       break;
     }
     case 'buffer_line_added': onLineAdded(bid, body); break;
@@ -1032,8 +1330,14 @@ function handleEvent(msg) {
       const b = S.buffers.get(bid);
       if (!b || !body) return;
       const i = b.type === 'free' ? b.lines.findIndex(l => l.y === body.y) : b.lines.findIndex(l => l.id === body.id);
-      if (i >= 0) b.lines[i] = body;
-      if (b.id === S.active) scheduleRerender();
+      if (i >= 0) {
+        if (b.linesFiltered != null) b.linesFiltered += Number(body.displayed === false) - Number(b.lines[i].displayed === false);
+        b.lines[i] = body;
+      }
+      if (b.id === S.active) {
+        if (S.search) { refreshSearchHits(b); updateSearchUI(); }
+        scheduleRerender();
+      }
       break;
     }
     case 'typing_nick_changed': case 'typing_set_nick': {
@@ -1096,6 +1400,8 @@ function onLineAdded(bid, line) {
     if (b.id === S.active) scheduleRerender();
     return;
   }
+  if (b.linesCount != null) b.linesCount++;
+  if (b.linesFiltered != null && line.displayed === false) b.linesFiltered++;
   b.lines.push(line);
   if (b.lines.length > MAX_LINES) { b.lines.splice(0, b.lines.length - MAX_LINES); b.hasMore = true; }
   const isActive = b.id === S.active;
@@ -1170,7 +1476,7 @@ function activate(id, { force = false } = {}) {
     saveDraft(prev, $('#input').value);
     stopTyping();
     const lastLine = prev.lines[prev.lines.length - 1];
-    if (lastLine) prev.lastReadId = lastLine.id;
+    if (lastLine) { prev.lastReadId = lastLine.id; prev.firstLineUnread = false; }
     if (settings.syncRead && S.connected) sendInput(prev, '/buffer set unread');
   }
   closeSearch({ render: false });   // search belongs to the buffer being left
@@ -1194,6 +1500,8 @@ function activate(id, { force = false } = {}) {
   closePopover();
   if (b.lazy && S.connected) ensureLoaded(b);
   if (S.connected) {
+    if (b.filterRefreshNeeded && !b.lazy) refreshBufferFilterHistory(b).catch(() => {});
+    readBufferFilterState(b);
     if (settings.syncRead) sendInput(b, '/buffer set hotlist -1');
     if (settings.syncCurrent) sendInput(b, '/buffer ' + b.name);
   }
@@ -1223,7 +1531,7 @@ const isCollapsed = key => collapsed.has(key);
 
 // Sidebar layout (#24), kept in this browser only — WeeChat's own buffer
 // numbers are untouched. Buffers are referenced by their full name.
-const layout = Object.assign({ pinned: [], order: {}, notify: {} }, store.get('layout', {}));
+const layout = Object.assign({ pinned: [], networks: [], order: {}, notify: {} }, store.get('layout', {}));
 const saveLayout = () => store.set('layout', layout);
 // Per-buffer notifications: 'all' (default), 'mentions' (only highlights and
 // private messages count and notify) or 'none' (muted: silent, no counts).
@@ -1246,7 +1554,9 @@ function buildGroups() {
     const g = groups.get(key);
     if (isServerBuf(b)) g.server = b; else g.items.push(b);
   }
-  const list = [...groups.values()].sort((a, b) => (a.key === 'core' ? -1 : b.key === 'core' ? 1 : a.min - b.min));
+  const networkPos = new Map(layout.networks.map((key, i) => [key, i]));
+  const rank = g => networkPos.has(g.key) ? networkPos.get(g.key) : 1e6 + g.min;
+  const list = [...groups.values()].sort((a, b) => (a.key === 'core' ? -1 : b.key === 'core' ? 1 : rank(a) - rank(b)));
   for (const g of list) applyCustomOrder(g);
   const byName = new Map(bufs.map(b => [b.name, b]));
   const pinnedItems = layout.pinned.map(n => byName.get(n)).filter(b => b && !isServerBuf(b));
@@ -1287,6 +1597,7 @@ function setNotifyLevel(b, lvl) {
   toast(lvl === 'none' ? `Muted ${bufLabel(b)}` : lvl === 'mentions' ? `${bufLabel(b)}: mentions only` : `${bufLabel(b)}: all messages`);
 }
 function moveBuffer(b, dir) {
+  if (b && isServerBuf(b)) { moveNetwork(naturalGroupKey(b), dir); return; }
   const g = b && groupOf(b);
   if (!g) return;
   const items = [...g.items], i = items.indexOf(b), j = i + dir;
@@ -1296,11 +1607,27 @@ function moveBuffer(b, dir) {
 }
 function resetOrder(key) { delete layout.order[key]; saveLayout(); renderSidebar(); }
 
+function setNetworkOrder(keys) {
+  const visible = new Set(keys);
+  let index = 0;
+  // Keep places for networks temporarily absent from the relay's buffer list.
+  layout.networks = layout.networks.map(key => visible.has(key) ? keys[index++] : key).concat(keys.slice(index));
+  saveLayout();
+  renderSidebar();
+}
+function moveNetwork(key, dir) {
+  const keys = buildGroups().filter(g => g.key.startsWith('irc:')).map(g => g.key);
+  const from = keys.indexOf(key), to = from + dir;
+  if (from < 0 || to < 0 || to >= keys.length) return;
+  [keys[from], keys[to]] = [keys[to], keys[from]];
+  setNetworkOrder(keys);
+}
+
 /* ─── Mark as read (#22) ───────────────────────────────────────────────── */
 function markRead(b) {
   b.unread = 0; b.mentions = 0;
   const last = b.lines[b.lines.length - 1];
-  if (last && b.id !== S.active) b.lastReadId = last.id;
+  if (last && b.id !== S.active) { b.lastReadId = last.id; b.firstLineUnread = false; }
 }
 function markBufferRead(b) {
   markRead(b);
@@ -1358,9 +1685,10 @@ function renderSidebar() {
       const cls = ['grp-name', s && s.id === S.active ? 'active' : '', gu ? 'unread' : ''].join(' ');
       html += `<div class="grp${col ? ' collapsed' : ''}${g.key === 'pinned' ? ' grp-pinned' : ''}" data-group="${esc(g.key)}">` +
         `<button class="grp-toggle" type="button" data-toggle="${esc(g.key)}" title="${col ? 'Expand' : 'Collapse'}">${ico('chev')}</button>` +
-        `<button class="${cls}" type="button" ${s ? `data-id="${esc(s.id)}"` : `data-toggle="${esc(g.key)}"`}>${g.key === 'pinned' ? ico('pin', 'i-sm') : ''}<span>${esc(g.label)}</span></button>` +
+        `<button class="${cls}" type="button" ${g.key.startsWith('irc:') ? `data-network="${esc(g.key)}"${draggable ? ' draggable="true"' : ''} title="${draggable ? 'Drag to reorder network; right-click for options' : 'Long-press for network options'}"` : ''} ${s ? `data-id="${esc(s.id)}"` : `data-toggle="${esc(g.key)}"`}>${g.key === 'pinned' ? ico('pin', 'i-sm') : ''}<span>${esc(g.label)}</span></button>` +
         (gm ? `<span class="badge">${gm}</span>` : gu && col ? `<span class="badge soft">${gu}</span>` : '') +
         (s ? `<button class="icon-btn grp-add" type="button" data-join="${esc(s.id)}" title="Join a channel">${ico('plus', 'i-sm')}</button>` : '') +
+        (g.key.startsWith('irc:') ? `<button class="icon-btn grp-menu" type="button" data-network-menu="${esc(g.key)}" aria-label="Network options for ${esc(g.label)}" title="Network options">${ico('more', 'i-sm')}</button>` : '') +
         `</div>`;
     }
     if (col) continue;
@@ -1413,12 +1741,7 @@ function renderHeader() {
   const irc = lv.plugin === 'irc' && (lv.type === 'channel' || lv.type === 'private');
   const f = $('#btnFilter');
   f.hidden = !irc;
-  const on = b.filterOverride ?? settings.smartFilter;
-  f.innerHTML = ico(on ? 'eyeOff' : 'eye');
-  f.classList.toggle('on', !!on);
-  f.title = on ? 'Smart-filtered IRC events hidden — click to show' :
-    settings.hideJoins ? 'Smart filter off; Hide all join/part/quit is still enabled in Settings' :
-    'Smart filter off — click to hide smart-filtered IRC events';
+  renderSmartFilterControls();
   $('#btnSearch').hidden = b.type === 'free';
   $('#fsetBar').hidden = b.lv.plugin !== 'fset';
   renderScriptBar();
@@ -1542,8 +1865,7 @@ function renderMessages() {
   box.classList.toggle('free-view', b.type === 'free');   // tool buffers scroll sideways (aligned columns)
   const lines = b.type === 'free' ? [...b.lines].sort((x, y) => x.y - y.y) : b.lines;
   const markerId = b.lastReadId;
-  const lastId = lines.length ? lines[lines.length - 1].id : null;
-  const markerIdx = markerId != null && lastId != null && markerId !== lastId ? lines.findIndex(l => l.id === markerId) : -1;
+  const markerIdx = b.firstLineUnread ? 0 : markerId != null ? lines.findIndex(l => l.id > markerId) : -1;
   const useMarker = markerIdx >= 0;
   // Render only the newest `renderCount` visible messages (plus the read
   // marker if it's further back); scrolling up reveals more.
@@ -1563,9 +1885,9 @@ function renderMessages() {
   }
   for (let i = start; i < lines.length; i++) {
     const l = lines[i];
-    if (!shownLine(b, l)) { if (useMarker && l.id === markerId) ctx.marker = true; continue; }
+    if (useMarker && i >= markerIdx) ctx.marker = true;
+    if (!shownLine(b, l)) continue;
     html += lineHtml(ctx, l);
-    if (useMarker && l.id === markerId) ctx.marker = true;
   }
   if (S.search?.only && S.search.q && !S.search.hits.length) html += `<div class="search-empty">No matching messages in the loaded history.</div>`;
   if (!lines.length) html += `<div class="buf-empty"><div class="big">${ico(b.lv.type === 'private' ? 'msg' : 'hash')}</div><h3>${esc(b.short_name || b.name)}</h3><div>No messages yet.</div></div>`;
@@ -1702,14 +2024,14 @@ async function fetchOlderLines(b) {
   if (b.loadingMore || !b.hasMore || !S.connected) return 0;
   b.loadingMore = true;
   try {
-    const want = Math.max(b.fetched, b.lines.length) + MORE_LINES;
-    const r = await request('GET', `/api/buffers/${b.id}/lines?lines=-${want}&colors=ansi`);
+    const want = Math.max(b.fetched, historyCount(b, b.lines)) + MORE_LINES;
+    const r = await request('GET', `/api/buffers/${b.id}/lines?lines=-${want}&colors=ansi${historyFilterParam(b)}`);
     const got = r.body || [];
     const firstId = b.lines.length ? b.lines[0].id : Infinity;
     const older = got.filter(l => l.id < firstId);
     b.lines = older.concat(b.lines);
     b.fetched = want;
-    b.hasMore = got.length >= want;
+    b.hasMore = hasOlderHistory(b, got, want);
     b.renderCount += older.length;
     return older.length;
   } finally { b.loadingMore = false; }
@@ -2140,7 +2462,7 @@ function confirmScriptAction() {
    Rendering — nicklist
    ═══════════════════════════════════════════════════════════════════════════ */
 const NICK_RANKS = [['~', 'Owners'], ['&', 'Admins'], ['@', 'Operators'], ['%', 'Half-ops'], ['+', 'Voiced']];
-function nickRank(n) { const p = (n.prefix || '').trim(); const i = NICK_RANKS.findIndex(r => r[0] === p); return i < 0 ? NICK_RANKS.length : i; }
+function nickRank(n) { const p = (n.prefix || '').trim(); const i = NICK_RANKS.findIndex(r => p.includes(r[0])); return i < 0 ? NICK_RANKS.length : i; }
 
 function renderNicklist() {
   const b = activeBuf();
@@ -2300,7 +2622,7 @@ function openNickMenu(anchor, nick) {
   if (!b || !nick) return;
   const n = [...b.nicks.values()].find(x => x.name === nick);
   const col = nickCss(nick, n?.color);
-  const isOp = ['~', '&', '@', '%'].includes(ownPrefix(b));
+  const isOp = [...ownPrefix(b)].some(prefix => ['~', '&', '@', '%'].includes(prefix));
   const isMe = nick === b.lv.nick;
   const role = n ? (NICK_RANKS[nickRank(n)]?.[1] || 'Member') : (b.lv.type === 'private' ? 'Private chat' : 'Not in channel');
   let html = `<div class="pop-h">${avatar(nick, col ? `color-mix(in srgb, ${col} 80%, #000)` : null)}<div style="min-width:0"><b${col ? ` style="color:${col}"` : ''}>${esc(nick)}</b><small>${esc(role.replace(/s$/, ''))}</small></div></div>`;
@@ -2328,6 +2650,29 @@ function openNickMenu(anchor, nick) {
     else if (act === 'kick') sendInput(b, '/kick ' + nick);
     else if (act === 'kickban') sendInput(b, '/kickban ' + nick);
   });
+}
+
+function openNetworkMenu(anchor, key) {
+  const networks = buildGroups().filter(g => g.key.startsWith('irc:'));
+  const index = networks.findIndex(g => g.key === key), g = networks[index];
+  if (!g) return;
+  let html = `<div class="pop-h"><div><b>${esc(g.label)}</b><small>Network order on this device</small></div></div>`;
+  if (index > 0) html += `<button class="pop-i" data-act="up">${ico('chevUp')}Move network up</button>`;
+  if (index < networks.length - 1) html += `<button class="pop-i" data-act="down">${ico('chevDown')}Move network down</button>`;
+  if (layout.networks.length) html += `<button class="pop-i" data-act="reset-networks">${ico('refresh')}Reset network order</button>`;
+  if (layout.order[key]) html += `<button class="pop-i" data-act="reset-channels">${ico('refresh')}Reset channel order</button>`;
+  if (!html.includes('data-act=')) html += '<div class="pop-lbl">No other networks to move past</div>';
+  const p = openPopover(anchor, html);
+  p.addEventListener('click', e => {
+    const action = e.target.closest('[data-act]')?.dataset.act;
+    if (!action) return;
+    closePopover();
+    if (action === 'up' || action === 'down') moveNetwork(key, action === 'up' ? -1 : 1);
+    else if (action === 'reset-networks') { layout.networks = []; saveLayout(); renderSidebar(); }
+    else if (action === 'reset-channels') resetOrder(key);
+    $(`[data-network-menu="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+  });
+  $('button', p)?.focus({ preventScroll: true });
 }
 
 // Buffer menu (#24): right-click, or long-press on touch screens.
@@ -3456,6 +3801,7 @@ async function refreshApp({ checkOnly = false } = {}) {
    ═══════════════════════════════════════════════════════════════════════════ */
 function openSettings(section) {
   syncSettingsUI();
+  if (S.connected && !S.smartFilterBusy) readSmartFilter().catch(() => {});
   renderAbout();
   renderInstallRow();
   renderRecentUploads();
@@ -3467,8 +3813,10 @@ function openSettings(section) {
 }
 
 function syncSettingsUI() {
+  renderSmartFilterControls();
   $$('#settingsDlg [data-setting]').forEach(el => {
     const k = el.dataset.setting;
+    if (k === 'smartFilter') return;   // an older cached Settings form
     if (el.classList.contains('seg')) $$('button', el).forEach(b => b.classList.toggle('on', b.dataset.v === String(settings[k])));
     else if (el.type === 'checkbox') el.checked = !!settings[k];
     else if (el.matches('input, select') && document.activeElement !== el) el.value = settings[k] ?? '';
@@ -3490,6 +3838,7 @@ function syncSettingsUI() {
   }
 }
 async function setSetting(k, v) {
+  if (k === 'smartFilter') return setSmartFilter(!!v);
   if (k === 'notify' && v) {
     if (!('Notification' in window)) { toast('Notifications are not supported in this browser', { error: true }); v = false; }
     else if (Notification.permission !== 'granted') {
@@ -3498,7 +3847,7 @@ async function setSetting(k, v) {
     }
   }
   settings[k] = v;
-  if ((k === 'smartFilter' || k === 'hideJoins') && activeBuf() && S.search) {
+  if (k === 'hideJoins' && activeBuf() && S.search) {
     refreshSearchHits(activeBuf());
     updateSearchUI();
   }
@@ -3820,7 +4169,7 @@ function init() {
     S.everConnected = false;
     S.forcePlain = false;
     S.failures = 0;
-    connect(cfg);
+    connect(cfg, { userInitiated: true });
   });
 
   // Sidebar
@@ -3828,6 +4177,8 @@ function init() {
   initNickResize();
   $('#bufList').addEventListener('click', e => {
     if (S.suppressClick) { S.suppressClick = false; e.preventDefault(); return; }   // the long-press already opened a menu
+    const networkMenu = e.target.closest('[data-network-menu]');
+    if (networkMenu) { openNetworkMenu(networkMenu, networkMenu.dataset.networkMenu); return; }
     if (e.target.closest('[data-markall]')) { markAllRead(); return; }
     const close = e.target.closest('[data-close]');
     if (close) {
@@ -3870,6 +4221,12 @@ function init() {
   // Buffer menu: right-click / keyboard context-menu key, and long-press on touch.
   const bufList = $('#bufList');
   bufList.addEventListener('contextmenu', e => {
+    const network = e.target.closest('.grp-name[data-network]');
+    if (network) {
+      e.preventDefault();
+      if (Date.now() - (S.longPressAt || 0) >= 800) openNetworkMenu(network, network.dataset.network);
+      return;
+    }
     const it = e.target.closest('.buf[data-id]');
     if (!it) return;
     e.preventDefault();
@@ -3880,39 +4237,59 @@ function init() {
   let lp = null;
   const cancelLongPress = () => { if (lp) { clearTimeout(lp.timer); lp = null; } };
   bufList.addEventListener('pointerdown', e => {
-    const it = e.target.closest('.buf[data-id]');
+    const it = e.target.closest('.buf[data-id], .grp-name[data-network]');
     if (!it || e.pointerType === 'mouse') return;
     cancelLongPress();
     lp = { x: e.clientX, y: e.clientY, timer: setTimeout(() => {
       lp = null;
-      const b = S.buffers.get(it.dataset.id);
-      if (!b) return;
+      const b = S.buffers.get(it.dataset.id), network = it.dataset.network;
+      if (!b && !network) return;
       S.longPressAt = Date.now();
       S.suppressClick = true;
       setTimeout(() => { S.suppressClick = false; }, 700);
       navigator.vibrate?.(10);
-      openBufferMenu(it, b);
+      if (network) openNetworkMenu(it, network);
+      else openBufferMenu(it, b);
     }, 500) };
   });
   bufList.addEventListener('pointermove', e => { if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress(); });
   for (const ev of ['pointerup', 'pointercancel', 'scroll']) bufList.addEventListener(ev, cancelLongPress, { passive: true });
 
-  // Drag and drop to reorder (desktop): within a group, into Pinned, or out of Pinned back home.
+  // Drag network headings to move whole groups; buffer rows stay within their
+  // network or move into/out of Pinned.
   const clearDropMarks = () => $$('#bufList .drop-before, #bufList .drop-after').forEach(r => r.classList.remove('drop-before', 'drop-after'));
   const dropAllowed = (from, row) => {
     const to = row.dataset.group, b = S.buffers.get(from.id);
     return b && (to === from.group || to === 'pinned' || (from.group === 'pinned' && to === naturalGroupKey(b)));
   };
   bufList.addEventListener('dragstart', e => {
+    const network = e.target.closest('.grp-name[data-network]');
+    if (network) {
+      S.drag = { kind: 'network', group: network.dataset.network };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', network.dataset.network);
+      network.closest('.grp').classList.add('dragging');
+      return;
+    }
     const it = e.target.closest('.buf[data-id]');
     if (!it) return;
     const row = it.closest('.buf-row');
-    S.drag = { id: it.dataset.id, group: row.dataset.group };
+    S.drag = { kind: 'buffer', id: it.dataset.id, group: row.dataset.group };
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', S.buffers.get(it.dataset.id)?.name || '');
     row.classList.add('dragging');
   });
   bufList.addEventListener('dragover', e => {
+    if (S.drag?.kind === 'network') {
+      const group = e.target.closest('.grp[data-group]');
+      if (!group?.dataset.group.startsWith('irc:') || group.dataset.group === S.drag.group) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = group.getBoundingClientRect();
+      clearDropMarks();
+      group.classList.add(e.clientY > rect.top + rect.height / 2 ? 'drop-after' : 'drop-before');
+      return;
+    }
     const row = e.target.closest('.buf-row');
     if (!S.drag || !row || !dropAllowed(S.drag, row)) return;
     e.preventDefault();
@@ -3923,6 +4300,18 @@ function init() {
     row.classList.add(after ? 'drop-after' : 'drop-before');
   });
   bufList.addEventListener('drop', e => {
+    if (S.drag?.kind === 'network') {
+      const group = e.target.closest('.grp[data-group]');
+      if (!group?.dataset.group.startsWith('irc:') || group.dataset.group === S.drag.group) return;
+      e.preventDefault();
+      const from = S.drag.group, after = group.classList.contains('drop-after');
+      const keys = buildGroups().filter(g => g.key.startsWith('irc:') && g.key !== from).map(g => g.key);
+      keys.splice(keys.indexOf(group.dataset.group) + (after ? 1 : 0), 0, from);
+      S.drag = null;
+      clearDropMarks();
+      setNetworkOrder(keys);
+      return;
+    }
     const row = e.target.closest('.buf-row');
     if (!S.drag || !row || !dropAllowed(S.drag, row)) return;
     e.preventDefault();
@@ -3963,13 +4352,8 @@ function init() {
   $('#btnNlClose').addEventListener('click', () => {
     if (matchMedia('(min-width: 1081px)').matches) setSetting('nicklist', false); else closeDrawers();
   });
-  $('#btnFilter').addEventListener('click', () => {
-    const b = activeBuf(); if (!b) return;
-    b.filterOverride = !(b.filterOverride ?? settings.smartFilter);
-    if (S.search) { refreshSearchHits(b); updateSearchUI(); }
-    renderHeader();
-    scheduleRerender();
-  });
+  $('#btnFilter').addEventListener('click', toggleBufferFilters);
+  $('#smartFilterSetting')?.addEventListener('change', e => setSmartFilter(e.target.checked));
   $('#tbTopic').addEventListener('click', e => { if (!e.target.closest('a')) e.currentTarget.classList.add('open'); });
 
   // Messages
@@ -4266,12 +4650,13 @@ function init() {
   // Visibility: place an "unread" marker for lines that arrive while away.
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) checkConnection();
+    if (!document.hidden) refreshFilterState();
     const b = activeBuf();
     if (!b) return;
     if (document.hidden) {
       const last = b.lines[b.lines.length - 1];
       S.awayMarker = !!last;
-      if (last) b.lastReadId = last.id;
+      if (last) { b.lastReadId = last.id; b.firstLineUnread = false; }
     } else {
       S.awayMarker = false;
       b.unread = 0; b.mentions = 0;

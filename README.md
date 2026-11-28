@@ -55,17 +55,26 @@ external requests.
 - Search within a buffer (<kbd>Ctrl</kbd>+<kbd>F</kbd>): highlighted matches,
   step through them, "Only matches" filter, and "Search older" to pull more
   history from the relay
-- Pin buffers to the top and reorder the sidebar (drag and drop, or
-  right-click / long-press a buffer for its menu); kept in your browser, so
-  WeeChat's own buffer numbers don't change
+- Pin buffers to the top and reorder networks and their channels in the sidebar.
+  On desktop, drag network headings or channel rows. On phones, use the network's
+  ⋯ menu, or long-press a channel for Move up / Move down. Network headings also
+  support right-click and long-press. Order is kept on this device; WeeChat's
+  buffer numbers don't change. Network menus can reset network or channel order.
 - "Mark all as read" (<kbd>Shift</kbd>+<kbd>Esc</kbd>), synced to WeeChat's hotlist
 - Clean message view: day separators, an unread marker, grouping of consecutive
   messages, highlight styling, compact join/part rows, `/me` actions
-- The eye button toggles smart filtering for the current buffer. Turning it off
-  reveals events tagged `irc_smart_filter`, including mode changes, even when
-  WeeChat marks those lines as hidden. Settings → Behaviour sets the default;
-  Hide all join/part/quit applies separately. Lines without the smart-filter tag
-  still follow WeeChat's display flag.
+- The eye button runs WeeChat's `/filter toggle @`, toggling all filters for
+  the current buffer, including existing history. This affects WeeChat and
+  other clients too. Settings → Chat → WeeChat smart filter separately controls
+  the global `irc.look.smart_filter` option, which tags new IRC events.
+  Message visibility follows WeeChat's display flags; Hide all join/part/quit
+  is a separate local display setting.
+  Older relays refresh the option every 15 seconds while Weave is visible;
+  relays with option-change events update it immediately.
+  The eye reflects WeeChat's per-buffer filter switch: crossed out and highlighted
+  when enabled, open when disabled. Weave reads this switch through a private
+  buffer local variable, including on 4.10.5, and checks the active buffer every
+  15 seconds for changes made elsewhere.
 - WeeChat colours rendered faithfully and contrast-corrected for the light and
   dark themes
 - **Colour themes**: pick one for dark mode (Weave, Solarized, Gruvbox,
@@ -130,6 +139,16 @@ external requests.
 Requires **WeeChat 4.3 or newer**. The API relay was introduced in WeeChat 4.3;
 earlier versions are not supported.
 
+Active support targets are the latest stable WeeChat release (currently 4.10.5)
+and upstream `main` (currently 5.0.0-dev). Older API relays are best effort.
+Weave detects optional relay capabilities instead of assuming every development
+build with the same API version has the same features. Newer relays provide
+live filter-change events and history counts; 4.10.5 keeps the polling and
+raw-line history fallbacks. When supported, history pages count visible messages
+and retain filtered lines between them, so filtered activity does not crowd out
+the conversation. Read markers also handle an unread buffer with no last-read
+line and a marker line missing from loaded history.
+
 ```
 /set relay.network.password "a-strong-password"
 /relay add tls.api 9000        # TLS (needs relay.network.tls_cert_key)
@@ -164,28 +183,48 @@ It's three static files; keep them together in one folder. Pick one:
 chat.example.com {
     root * /var/www/weave
     file_server
-    reverse_proxy /api* 127.0.0.1:9000
+    @relay path /api /api/*
+    reverse_proxy @relay 127.0.0.1:9000 {
+        transport http {
+            keepalive off
+        }
+    }
 }
 ```
 
 ### nginx
 
 ```nginx
+# Put the map in nginx's http context, outside the server block.
+map $http_upgrade $weave_connection {
+    default upgrade;
+    ''      close;
+}
+
+# Put these locations inside the server block.
 location / {
     root /var/www/weave;
     index index.html;
 }
-location /api {
+location ~ ^/api(?:/|$) {
     proxy_pass http://127.0.0.1:9000;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
+    proxy_set_header Connection $weave_connection;
     proxy_read_timeout 1d;
 }
 ```
 
 With a proxy in front, the relay itself can be a plain `/relay add api 9000`
 bound to localhost (`/set relay.network.bind_address "127.0.0.1"`).
+
+Close the short-lived HTTP connections to the relay after each response, as
+these examples do. An unauthenticated `/api/handshake` can succeed but leave an
+idle connection that later logs `relay: authentication failed` when WeeChat's
+authentication timeout expires. WebSocket connections stay open for chat.
+The deployment templates in `deploy/Caddyfile` and `deploy/nginx.conf` include
+these relay blocks as commented examples; uncomment them only when hosting
+your own relay alongside Weave.
 
 ### Mac app
 
@@ -269,6 +308,14 @@ needs:
 
 Relays on private or Tailscale addresses may make the browser ask for
 local-network access (e.g. Chrome's "Local Network Access" prompt).
+Tap **Connect** and choose **Allow** when asked. Weave allows up to a minute
+for the prompt during the initial handshake. If permission is needed before
+an automatic connection, Weave asks you to tap Connect first.
+If access was blocked, enable it for the Weave site in your browser settings.
+In Chrome on Android: **Settings → Site settings → Local network access**.
+Permission for Chrome itself, or for another site such as Glowing Bear, does
+not grant permission to Weave. Browsers that do not support this permission
+continue using their normal connection behavior.
 
 ### Self-signed certificates
 

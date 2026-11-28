@@ -65,6 +65,7 @@
       </details>
       <div id="cError" class="alert" role="alert" hidden></div>
       <button class="btn primary block" id="cSubmit" type="submit">Connect</button>
+      <p class="hint" id="cNetworkHint" role="status" hidden>If your browser asks to find devices on your local network, choose Allow so Weave can reach your relay. Waiting for your response…</p>
       <p class="hint" id="cPrivacy" hidden>Your settings and password stay in this browser. This site only delivers the app: it stores nothing and never sees your chat.</p>
     </form>
     <!-- Public mode: relay-owner checklist (the origin command is filled in by weave.js). -->
@@ -113,7 +114,7 @@
       </div>
       <div class="tb-actions">
         <button class="icon-btn" id="btnSearch" type="button" title="Search this buffer (Ctrl+F)"><svg class="i" data-i="search"></svg></button>
-        <button class="icon-btn" id="btnFilter" type="button" title="Hide join/part/quit noise"></button>
+        <button class="icon-btn" id="btnFilter" type="button" title="Toggle all WeeChat filters in this buffer"></button>
         <button class="pill-btn" id="btnMembers" type="button" title="Members"><svg class="i i-sm" data-i="users"></svg><span id="memberCount"></span></button>
       </div>
     </header>
@@ -237,8 +238,8 @@
       <div class="set-sec"><h3>Chat</h3>
         <div class="set-row"><div class="lbl"><b>Group consecutive messages</b><small>Show a nick once per run of messages</small></div>
           <label class="switch"><input type="checkbox" data-setting="groupMessages"><span class="sw"></span></label></div>
-        <div class="set-row"><div class="lbl"><b>Smart filter by default</b><small>Hide IRC events tagged by WeeChat's smart filter, including joins, parts, quits, nick and mode changes. The eye button overrides this per buffer.</small></div>
-          <label class="switch"><input type="checkbox" data-setting="smartFilter"><span class="sw"></span></label></div>
+        <div class="set-row"><div class="lbl"><b>WeeChat smart filter</b><small>Controls irc.look.smart_filter for all buffers and connected clients. Existing hidden lines still follow WeeChat's filter rules.</small></div>
+          <label class="switch"><input type="checkbox" id="smartFilterSetting" aria-label="WeeChat smart filter" disabled><span class="sw"></span></label></div>
         <div class="set-row"><div class="lbl"><b>Hide all join/part/quit</b></div>
           <label class="switch"><input type="checkbox" data-setting="hideJoins"><span class="sw"></span></label></div>
         <div class="set-row"><div class="lbl"><b>Media previews</b><small>Images &amp; video from links load from third-party hosts</small></div>
